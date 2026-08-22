@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import type {GridTier, InventoryItem, Stats, TargetStats, Point, ModuleShape, ModuleColor, ItemEffect} from '../types';
-import { getBaseStats, applyInternalEffects, PRECOMPUTED_OFFSETS } from '../utils';
+import { getBaseStats, applyInternalEffects, PRECOMPUTED_OFFSETS, roundStat } from '../utils';
 import { MODULE_TEMPLATES } from '../constants';
+import { calculateBoardStats, calculateFitness, localSearch, isAlarm, isJunk, isBlast } from '../statEngine';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://yhiojdutwgfxrgakbrjs.supabase.co';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InloaW9qZHV0d2dmeHJnYWticmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0ODcwMjMsImV4cCI6MjEwMjA2MzAyM30.lVkU06tLfM64aFYL2Gx-UMPFL9KCRSaadu58TDWMmSI';
@@ -94,8 +95,6 @@ class BitReader {
         return value;
     }
 }
-
-const roundStat = (val: number) => val < 0 ? Math.ceil(val) : Math.floor(val);
 
 const generateCodeFromState = (
     currentTier: GridTier,
@@ -199,178 +198,6 @@ export function initializeBoard(currentTier: GridTier) {
     return grid;
 }
 
-export const calculateBoardStats = (currentBoard: (InventoryItem | 'Locked' | null)[][], currentInventory: InventoryItem[]) => {
-    const totals: Stats = { Performance: 0, Quality: 0, Efficiency: 0 };
-    const pieceStats = new Map<string, Stats>();
-    let coveredNodeSides = 0;
-    let negativeContactCount = 0;
-    let placedPiecesCount = 0;
-    let placedAlarmsCount = 0;
-    let placedJunkCount = 0;
-    let placedBlastCount = 0;
-
-    const offsets = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
-    const placedPieces = new Map<string, { item: InventoryItem, minX: number, minY: number }>();
-    const nodeAdjacencies = new Map<string, Set<string>>();
-    const gridItemMap = new Map<string, InventoryItem>();
-
-    for (let y = 0; y < 5; y++) {
-        for (let x = 0; x < 7; x++) {
-            const boardCell = currentBoard[y][x];
-            if (boardCell && boardCell !== 'Locked') {
-                const cell = currentInventory.find(i => i.id === boardCell.id) || boardCell;
-                gridItemMap.set(`${x},${y}`, cell);
-
-                if (!placedPieces.has(cell.id)) {
-                    placedPieces.set(cell.id, { item: cell, minX: x, minY: y });
-                    placedPiecesCount++;
-                } else {
-                    const p = placedPieces.get(cell.id)!;
-                    if (x < p.minX) p.minX = x;
-                    if (y < p.minY) p.minY = y;
-                }
-
-                if (cell.color === 'White') {
-                    if (!nodeAdjacencies.has(cell.id)) nodeAdjacencies.set(cell.id, new Set());
-                    offsets.forEach(off => {
-                        const nx = x + off.x; const ny = y + off.y;
-                        if (nx >= 0 && nx < 7 && ny >= 0 && ny < 5) {
-                            const adjBoardCell = currentBoard[ny][nx];
-                            if (adjBoardCell && adjBoardCell !== 'Locked') {
-                                const adj = currentInventory.find(i => i.id === adjBoardCell.id) || adjBoardCell;
-                                if (adj.color !== 'White') {
-                                    nodeAdjacencies.get(cell.id)!.add(adj.id);
-                                    coveredNodeSides++;
-
-                                    const adjModified = applyInternalEffects(adj);
-                                    const isPureNegative =
-                                        (roundStat(adjModified.Performance) <= 0 && roundStat(adjModified.Quality) <= 0 && roundStat(adjModified.Efficiency) <= 0) &&
-                                        (roundStat(adjModified.Performance) < 0 || roundStat(adjModified.Quality) < 0 || roundStat(adjModified.Efficiency) < 0);
-
-                                    if (isPureNegative) {
-                                        negativeContactCount++;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-        }
-    }
-
-    const internalStats = new Map<string, Stats>();
-    placedPieces.forEach(({ item }) => {
-        if (item.displayName.includes('Alarm Module')) placedAlarmsCount++;
-        if (item.displayName.includes('Junk Processing')) placedJunkCount++;
-        if (item.displayName.includes('Blast Module')) placedBlastCount++;
-
-        if (item.color !== 'White') {
-            let modified = applyInternalEffects(item);
-
-            const nfCount = item.effects.filter(e => e === 'Negative Feedback').length;
-            if (nfCount > 0) {
-                let nfPerf = 0, nfQual = 0, nfEff = 0;
-                const adjacentNeighborIds = new Set<string>();
-
-                gridItemMap.forEach((cellItem, coordStr) => {
-                    if (cellItem.id === item.id) {
-                        const [cx, cy] = coordStr.split(',').map(Number);
-                        offsets.forEach(off => {
-                            const nx = cx + off.x;
-                            const ny = cy + off.y;
-                            const neighborItem = gridItemMap.get(`${nx},${ny}`);
-                            if (neighborItem && neighborItem.id !== item.id && neighborItem.color !== 'White') {
-                                adjacentNeighborIds.add(neighborItem.id);
-                            }
-                        });
-                    }
-                });
-
-                adjacentNeighborIds.forEach(neighborId => {
-                    const neighborItem = Array.from(gridItemMap.values()).find(i => i.id === neighborId);
-                    if (neighborItem) {
-                        const neighborBase = applyInternalEffects(neighborItem);
-                        if (neighborBase.Performance < 0) nfPerf += neighborBase.Performance;
-                        if (neighborBase.Quality < 0) nfQual += neighborBase.Quality;
-                        if (neighborBase.Efficiency < 0) nfEff += neighborBase.Efficiency;
-                    }
-                });
-
-                modified.Performance += (nfCount * 0.25 * nfPerf);
-                modified.Quality += (nfCount * 0.25 * nfQual);
-                modified.Efficiency += (nfCount * 0.25 * nfEff);
-            }
-
-            modified.Performance = roundStat(modified.Performance);
-            modified.Quality = roundStat(modified.Quality);
-            modified.Efficiency = roundStat(modified.Efficiency);
-
-            internalStats.set(item.id, modified);
-        }
-    });
-
-    placedPieces.forEach(({ item, minX, minY }) => {
-        if (item.color !== 'White') {
-            let { Performance: p, Quality: q, Efficiency: e } = internalStats.get(item.id)!;
-
-            let multiplier = 0;
-            if (item.effects.includes('Side Mount') && minX === 0) multiplier += 0.20;
-            if (item.effects.includes('Top Mount') && minY === 0) multiplier += 0.20;
-
-            if (item.effects.includes('Receiver')) {
-                let adjNodes = 0;
-                nodeAdjacencies.forEach((adjSet) => { if (adjSet.has(item.id)) adjNodes++; });
-                multiplier += (0.10 * adjNodes);
-            }
-
-            if (multiplier > 0) {
-                p = roundStat(p * (1 + multiplier));
-                q = roundStat(q * (1 + multiplier));
-                e = roundStat(e * (1 + multiplier));
-            }
-
-            const finalStats = {
-                Performance: roundStat(p),
-                Quality: roundStat(q),
-                Efficiency: roundStat(e)
-            };
-
-            pieceStats.set(item.id, finalStats);
-            totals.Performance += finalStats.Performance;
-            totals.Quality += finalStats.Quality;
-            totals.Efficiency += finalStats.Efficiency;
-        }
-    });
-
-    nodeAdjacencies.forEach((adjIds, nodeId) => {
-        let nodeP = 0, nodeQ = 0, nodeE = 0;
-
-        adjIds.forEach(adjId => {
-            const adjacentItemData = placedPieces.get(adjId);
-            if (adjacentItemData) {
-                const baseAdj = applyInternalEffects(adjacentItemData.item);
-                nodeP += baseAdj.Performance;
-                nodeQ += baseAdj.Quality;
-                nodeE += baseAdj.Efficiency;
-            }
-        });
-
-        const nodeStat = {
-            Performance: roundStat(nodeP * 0.20),
-            Quality: roundStat(nodeQ * 0.20),
-            Efficiency: roundStat(nodeE * 0.20)
-        };
-
-        pieceStats.set(nodeId, nodeStat);
-        totals.Performance += nodeStat.Performance;
-        totals.Quality += nodeStat.Quality;
-        totals.Efficiency += nodeStat.Efficiency;
-    });
-
-    return { totals, pieceStats, coveredNodeSides, negativeContactCount, placedPiecesCount, placedAlarmsCount, placedJunkCount, placedBlastCount };
-};
-
 export const evaluatePlacementDelta = (
     piece: InventoryItem,
     x: number, y: number,
@@ -383,7 +210,7 @@ export const evaluatePlacementDelta = (
 ) => {
     let isConnected = false;
     let adjNodes = 0;
-    let negFeedbackBonus = 0;
+    let negFeedbackBonusP = 0, negFeedbackBonusQ = 0, negFeedbackBonusE = 0;
     let negativeContactCount = 0;
 
     const internal = precomputedInternal.get(piece.id)!;
@@ -460,9 +287,9 @@ export const evaluatePlacementDelta = (
 
         if (nfCount > 0 && adjPiece.color !== 'White') {
             const adjInternal = precomputedInternal.get(adjId)!;
-            if (adjInternal.Performance < 0) negFeedbackBonus += roundStat(nfCount * 0.25 * adjInternal.Performance);
-            if (adjInternal.Quality < 0) negFeedbackBonus += roundStat(nfCount * 0.25 * adjInternal.Quality);
-            if (adjInternal.Efficiency < 0) negFeedbackBonus += roundStat(nfCount * 0.25 * adjInternal.Efficiency);
+            if (adjInternal.Performance < 0) negFeedbackBonusP += roundStat(nfCount * 0.25 * adjInternal.Performance);
+            if (adjInternal.Quality < 0) negFeedbackBonusQ += roundStat(nfCount * 0.25 * adjInternal.Quality);
+            if (adjInternal.Efficiency < 0) negFeedbackBonusE += roundStat(nfCount * 0.25 * adjInternal.Efficiency);
         }
     });
 
@@ -474,9 +301,9 @@ export const evaluatePlacementDelta = (
         e = roundStat(e * (1 + multiplier));
     }
 
-    p += negFeedbackBonus;
-    q += negFeedbackBonus;
-    e += negFeedbackBonus;
+    p += negFeedbackBonusP;
+    q += negFeedbackBonusQ;
+    e += negFeedbackBonusE;
 
     const statScore = (p * weightP) + (q * weightQ) + (e * weightE) + nodeBonusScore;
     return statScore + (adjNodes * 0.05) - (negativeContactCount * 1000);
@@ -489,6 +316,23 @@ export type MachineConfig = {
     maximizeStats: any;
 };
 
+// Beam search: each machine gets its own K independent search agents whose boards/temperatures/
+// best-scores must persist across round-robin turns (a "turn" only advances ONE agent of ONE
+// machine at a time, unlike the old per-machine while-loop where all K agents advanced together
+// on every tick).
+const BEAM_SIZE = 4;
+const T0 = 50;        // initial simulated-annealing temperature
+const DECAY = 0.985;  // per-turn cooling rate
+const STAGNATION_LIMIT = 75;
+
+type BeamState = {
+    boards: (InventoryItem | 'Locked' | null)[][][];
+    temperatures: number[];
+    bestScores: number[];
+    stagnation: number;
+    cursor: number;
+};
+
 export const runOptimizationEngine = async (
     machines: MachineConfig[],
     initialBoards: any[][][],
@@ -499,16 +343,17 @@ export const runOptimizationEngine = async (
     const precomputedInternal = new Map<string, Stats>();
     inventory.forEach(item => precomputedInternal.set(item.id, applyInternalEffects(item)));
 
+    // Computed once from the FULL shared inventory (not any one machine's unclaimed slice) so a
+    // machine that starts after another has claimed all stat-bearing items doesn't permanently
+    // lock into pure packing-score mode.
+    const hasAnyPositiveStats = inventory.some(item => {
+        const modified = applyInternalEffects(item);
+        return roundStat(modified.Performance) > 0 || roundStat(modified.Quality) > 0 || roundStat(modified.Efficiency) > 0;
+    });
+
     let globalBestScore = -Infinity;
     let currentBoards = initialBoards.map(b => b.map(row => [...row]));
     let currentTotals = currentBoards.map(b => calculateBoardStats(b, inventory).totals);
-
-    let stagnationCounter = 0;
-    const STAGNATION_LIMIT = 150;
-
-    const isAlarm = (p: InventoryItem) => p.displayName.includes('Alarm Module');
-    const isJunk = (p: InventoryItem) => p.displayName.includes('Junk Processing');
-    const isBlast = (p: InventoryItem) => p.displayName.includes('Blast Module');
 
     const baseWeights = machines.map(m => {
         let wp = m.maximizeStats.Performance ? 10 : 0.1;
@@ -520,76 +365,38 @@ export const runOptimizationEngine = async (
         return { wp, wq, we };
     });
 
+    const beamStates: BeamState[] = machines.map((m) => ({
+        boards: new Array(BEAM_SIZE).fill(null).map(() => initializeBoard(m.tier)),
+        temperatures: new Array(BEAM_SIZE).fill(T0),
+        bestScores: new Array(BEAM_SIZE).fill(-Infinity),
+        stagnation: 0,
+        cursor: 0,
+    }));
+
     while (isSolvingRef.current) {
         let testBoards = currentBoards.map(b => b.map(row => [...row]));
-        const isStagnant = stagnationCounter >= STAGNATION_LIMIT;
 
-        // pick one random machine to optimize
+        // pick one random machine to optimize this turn
         const targetMIdx = Math.floor(Math.random() * machines.length);
-        const placedIds = new Set<string>();
-        let targetBoardEmpty = true;
+        const targetConfig = machines[targetMIdx];
+        const state = beamStates[targetMIdx];
 
+        // items already committed to OTHER machines' boards are off-limits to this turn's beam agent
+        const usedByOthers = new Set<string>();
         for (let mIdx = 0; mIdx < machines.length; mIdx++) {
-            if (mIdx === targetMIdx) {
-                let piecesOnTarget: string[] = [];
-                for(let y=0; y<5; y++) {
-                    for(let x=0; x<7; x++) {
-                        const cell = testBoards[mIdx][y][x];
-                        if (cell && cell !== 'Locked') {
-                            if (!piecesOnTarget.includes(cell.id)) piecesOnTarget.push(cell.id);
-                        }
-                    }
-                }
-
-                if (piecesOnTarget.length > 0) {
-                    let removeCount = isStagnant
-                        ? Math.max(1, Math.floor(piecesOnTarget.length * (0.5 + Math.random() * 0.4)))
-                        : Math.floor(Math.random() * Math.min(3, piecesOnTarget.length)) + 1;
-
-                    piecesOnTarget.sort(() => Math.random() - 0.5);
-                    const removed = new Set(piecesOnTarget.slice(0, removeCount));
-
-                    for(let y=0; y<5; y++) {
-                        for(let x=0; x<7; x++) {
-                            const cell = testBoards[mIdx][y][x];
-                            if (cell && cell !== 'Locked' && removed.has(cell.id)) {
-                                testBoards[mIdx][y][x] = null;
-                            } else if (cell && cell !== 'Locked') {
-                                placedIds.add(cell.id);
-                                targetBoardEmpty = false;
-                            }
-                        }
-                    }
-                }
-            } else {
-                for(let y=0; y<5; y++) {
-                    for(let x=0; x<7; x++) {
-                        const cell = testBoards[mIdx][y][x];
-                        if (cell && cell !== 'Locked') placedIds.add(cell.id);
-                    }
+            if (mIdx === targetMIdx) continue;
+            for (let y = 0; y < 5; y++) {
+                for (let x = 0; x < 7; x++) {
+                    const cell = testBoards[mIdx][y][x];
+                    if (cell && cell !== 'Locked') usedByOthers.add(cell.id);
                 }
             }
         }
 
-        const pool = inventory.filter(inv => !placedIds.has(inv.id));
-        const alarms = pool.filter(isAlarm);
-        const junks = pool.filter(isJunk);
-        const blasts = pool.filter(isBlast);
-        const others = pool.filter(p => !isAlarm(p) && !isJunk(p) && !isBlast(p));
-
-        const itemsToPlace = [
-            ...alarms.sort(() => Math.random() - 0.5),
-            ...junks.sort(() => Math.random() - 0.5),
-            ...blasts.sort(() => Math.random() - 0.5),
-            ...others.sort(() => Math.random() - 0.5)
-        ];
-
+        // dynamic heuristic weight adjustment if stats% are behind other machines
         let dynWp = baseWeights[targetMIdx].wp;
         let dynWq = baseWeights[targetMIdx].wq;
         let dynWe = baseWeights[targetMIdx].we;
-
-        // dynamic heuristic weight adjustment if stats% are behind other machines
-        const targetConfig = machines[targetMIdx];
         if (machines.length > 1) {
             if (targetConfig.maximizeStats.Performance && targetConfig.targetStats.Performance === null) {
                 const avgP = currentTotals.reduce((s, t) => s + t.Performance, 0) / machines.length;
@@ -605,29 +412,193 @@ export const runOptimizationEngine = async (
             }
         }
 
+        // 1. Pull this beam agent's persisted board, dropping anything claimed by another machine meanwhile
+        const beamIdx = state.cursor;
+        state.cursor = (state.cursor + 1) % BEAM_SIZE;
+
+        let beamBoard = state.boards[beamIdx].map(row => [...row]);
+        const placedOnBeam = new Set<string>();
+        let beamBoardEmpty = true;
+        for (let y = 0; y < 5; y++) {
+            for (let x = 0; x < 7; x++) {
+                const cell = beamBoard[y][x];
+                if (cell && cell !== 'Locked') {
+                    if (usedByOthers.has(cell.id)) {
+                        beamBoard[y][x] = null;
+                    } else {
+                        placedOnBeam.add(cell.id);
+                        beamBoardEmpty = false;
+                    }
+                }
+            }
+        }
+
+        // 2. Targeted mutation: remove the worst-scoring pieces first (not a blind random restart)
+        const isStagnant = state.stagnation >= STAGNATION_LIMIT;
+        if (placedOnBeam.size > 0) {
+            const { pieceStats } = calculateBoardStats(beamBoard, inventory);
+            const scoredIds = Array.from(placedOnBeam).sort((a, b) => {
+                const sa = pieceStats.get(a);
+                const sb = pieceStats.get(b);
+                const scoreA = sa ? sa.Performance * dynWp + sa.Quality * dynWq + sa.Efficiency * dynWe : 0;
+                const scoreB = sb ? sb.Performance * dynWp + sb.Quality * dynWq + sb.Efficiency * dynWe : 0;
+                return scoreA - scoreB; // worst first
+            });
+
+            let removeCount;
+            if (isStagnant) {
+                removeCount = Math.max(1, Math.floor(scoredIds.length * (0.5 + Math.random() * 0.4)));
+                state.stagnation = 0;
+            } else {
+                removeCount = Math.floor(Math.random() * Math.min(3, scoredIds.length)) + 1;
+            }
+
+            const toRemove = new Set(scoredIds.slice(0, removeCount));
+            for (let y = 0; y < 5; y++) {
+                for (let x = 0; x < 7; x++) {
+                    const cell = beamBoard[y][x];
+                    if (cell && cell !== 'Locked' && toRemove.has(cell.id)) beamBoard[y][x] = null;
+                }
+            }
+            toRemove.forEach(id => placedOnBeam.delete(id));
+        }
+
+        let boardHasJunk = false;
+        let boardHasBlast = false;
+        placedOnBeam.forEach(id => {
+            const p = inventory.find(i => i.id === id);
+            if (p) {
+                if (isJunk(p)) boardHasJunk = true;
+                if (isBlast(p)) boardHasBlast = true;
+            }
+        });
+
+        const rawPool = inventory.filter(inv => !usedByOthers.has(inv.id) && !placedOnBeam.has(inv.id));
+        const poolAlarms = rawPool.filter(isAlarm);
+        const poolJunks = rawPool.filter(isJunk);
+        const poolBlasts = rawPool.filter(isBlast);
+        const poolOthers = rawPool.filter(p => !isAlarm(p) && !isJunk(p) && !isBlast(p));
+
+        const mandatoryThisTurn: InventoryItem[] = [...poolAlarms];
+        const fillerThisTurn: InventoryItem[] = [];
+        const mandatoryIds = new Set<string>();
+
+        if (!boardHasJunk && poolJunks.length > 0) {
+            const shuffled = [...poolJunks].sort(() => Math.random() - 0.5);
+            mandatoryThisTurn.push(shuffled.shift()!);
+            fillerThisTurn.push(...shuffled);
+        } else {
+            fillerThisTurn.push(...poolJunks);
+        }
+
+        if (!boardHasBlast && poolBlasts.length > 0) {
+            const shuffled = [...poolBlasts].sort(() => Math.random() - 0.5);
+            mandatoryThisTurn.push(shuffled.shift()!);
+            fillerThisTurn.push(...shuffled);
+        } else {
+            fillerThisTurn.push(...poolBlasts);
+        }
+
+        mandatoryThisTurn.forEach(p => mandatoryIds.add(p.id));
+
+        let itemsToPlace = [
+            ...mandatoryThisTurn.sort(() => Math.random() - 0.5),
+            ...poolOthers.sort(() => Math.random() - 0.5),
+            ...fillerThisTurn.sort(() => Math.random() - 0.5)
+        ];
+
+        beamBoardEmpty = true;
+        findNonEmpty: for (let y = 0; y < 5; y++) {
+            for (let x = 0; x < 7; x++) {
+                if (beamBoard[y][x] && beamBoard[y][x] !== 'Locked') { beamBoardEmpty = false; break findNonEmpty; }
+            }
+        }
+
+        // 3. Constraint-aware ordering: place the most constrained pieces first (fewer valid spots = higher priority)
+        itemsToPlace = itemsToPlace.slice().sort((a, b) => {
+            const countValid = (piece: InventoryItem) => {
+                const pieceOrientations = PRECOMPUTED_OFFSETS.get(piece.shape) || [];
+                let valid = 0;
+                for (const offs of pieceOrientations) {
+                    for (let y = 0; y < 5 && valid < 16; y++) {
+                        for (let x = 0; x < 7 && valid < 16; x++) {
+                            if (evaluatePlacementDelta(piece, x, y, offs, beamBoard, beamBoardEmpty, precomputedInternal, dynWp, dynWq, dynWe, inventory) !== -Infinity) valid++;
+                        }
+                    }
+                }
+                return valid;
+            };
+            return countValid(a) - countValid(b);
+        });
+
+        // 4. Greedy placement (top-3 randomized among the best heuristic spots)
         for (const piece of itemsToPlace) {
+            const isFiller = (isJunk(piece) || isBlast(piece)) && !mandatoryIds.has(piece.id);
             const orientations = PRECOMPUTED_OFFSETS.get(piece.shape) || [];
-            let bestLocalPlacement = null;
-            let highestHeuristic = -Infinity;
+            const validPlacements: { x: number, y: number, offsets: Point[], heuristicScore: number }[] = [];
 
             for (const offsets of orientations) {
                 for (let y = 0; y < 5; y++) {
                     for (let x = 0; x < 7; x++) {
-                        const deltaScore = evaluatePlacementDelta(piece, x, y, offsets, testBoards[targetMIdx], targetBoardEmpty, precomputedInternal, dynWp, dynWq, dynWe, inventory);
-                        if (deltaScore > highestHeuristic && deltaScore !== -Infinity) {
-                            highestHeuristic = deltaScore;
-                            bestLocalPlacement = { x, y, offsets };
+                        const deltaScore = evaluatePlacementDelta(piece, x, y, offsets, beamBoard, beamBoardEmpty, precomputedInternal, dynWp, dynWq, dynWe, inventory);
+                        if (deltaScore !== -Infinity) {
+                            if (isFiller && deltaScore < 0) continue;
+                            validPlacements.push({ x, y, offsets, heuristicScore: deltaScore });
                         }
                     }
                 }
             }
 
-            if (bestLocalPlacement) {
-                const { x, y, offsets } = bestLocalPlacement;
-                for (const pt of offsets) testBoards[targetMIdx][y + pt.y][x + pt.x] = piece;
-                targetBoardEmpty = false;
+            if (validPlacements.length > 0) {
+                validPlacements.sort((a, b) => b.heuristicScore - a.heuristicScore);
+                const topN = Math.min(3, validPlacements.length);
+                const picked = validPlacements[Math.floor(Math.random() * topN)];
+                for (const pt of picked.offsets) beamBoard[picked.y + pt.y][picked.x + pt.x] = piece;
+                beamBoardEmpty = false;
             }
         }
+
+        // 5. Local search polish
+        const targetAlarmCount = inventory.filter(isAlarm).filter(i => !usedByOthers.has(i.id)).length;
+        const targetJunkCount = (boardHasJunk || rawPool.some(isJunk)) ? 1 : 0;
+        const targetBlastCount = (boardHasBlast || rawPool.some(isBlast)) ? 1 : 0;
+
+        const lsResult = localSearch(beamBoard, inventory, targetConfig.maximizeStats, targetConfig.targetStats, targetAlarmCount, targetJunkCount, targetBlastCount, 100);
+        beamBoard = lsResult.board;
+
+        // 6. Score this beam agent's candidate and apply the simulated-annealing acceptance rule —
+        // this only gates what the NEXT turn for this beam agent explores from; it is independent
+        // of whether the candidate gets committed/broadcast (that's the cross-machine gate below).
+        const beamBoardResult = calculateBoardStats(beamBoard, inventory);
+        const beamFitness = calculateFitness(
+            beamBoardResult.totals, beamBoardResult.placedPiecesCount, beamBoardResult.placedAlarmsCount,
+            beamBoardResult.placedJunkCount, beamBoardResult.placedBlastCount,
+            hasAnyPositiveStats, targetConfig.maximizeStats, targetConfig.targetStats,
+            targetAlarmCount, targetJunkCount, targetBlastCount
+        ).score;
+
+        const delta = beamFitness - state.bestScores[beamIdx];
+        if (delta > 0 || Math.random() < Math.exp(delta / state.temperatures[beamIdx])) {
+            state.bestScores[beamIdx] = beamFitness;
+            state.boards[beamIdx] = beamBoard.map(row => [...row]);
+            state.temperatures[beamIdx] = delta > 0 ? T0 : state.temperatures[beamIdx] * DECAY;
+        } else {
+            state.temperatures[beamIdx] *= DECAY;
+            state.stagnation++;
+        }
+
+        // Every BEAM_SIZE turns for this machine, prune its worst-performing agent so it restarts fresh
+        if (beamIdx === BEAM_SIZE - 1) {
+            let worst = 0;
+            for (let b = 1; b < BEAM_SIZE; b++) {
+                if (state.bestScores[b] < state.bestScores[worst]) worst = b;
+            }
+            state.boards[worst] = initializeBoard(targetConfig.tier);
+            state.temperatures[worst] = T0;
+            state.bestScores[worst] = -Infinity;
+        }
+
+        testBoards[targetMIdx] = beamBoard;
 
         let currentScore = 0;
         const machineTotals: Stats[] = [];
@@ -702,16 +673,12 @@ export const runOptimizationEngine = async (
                 });
             }
             onUpdate(updates);
-            stagnationCounter = 0;
+            state.stagnation = 0;
         } else if (currentScore === globalBestScore && Math.random() > 0.5) {
             currentBoards = testBoards.map(b => b.map(row => [...row]));
             currentTotals = machineTotals;
-            stagnationCounter++;
-        } else {
-            stagnationCounter++;
         }
 
-        if (isStagnant) stagnationCounter = 0;
         await new Promise(resolve => setTimeout(resolve, 0));
     }
 };
@@ -780,7 +747,7 @@ export function useOptimizer(
 
     const manuallyPlaceItem = (item: InventoryItem, rootX: number, rootY: number, offsets: Point[]) => {
         const next = boardRef.current.map(row => [...row]);
-        let swapItemIds = new Set<string>();
+        const swapItemIds = new Set<string>();
 
         for (const pt of offsets) {
             const px = rootX + pt.x;

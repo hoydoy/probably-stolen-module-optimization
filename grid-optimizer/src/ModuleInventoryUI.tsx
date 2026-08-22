@@ -691,7 +691,7 @@ export default function ModuleInventoryUI() {
                 isFlipping = true;
             }
 
-            let rawNewOffsets = currentDrag.offsets.map(transform);
+            const rawNewOffsets = currentDrag.offsets.map(transform);
             let minX = Math.min(...rawNewOffsets.map(p => p.x));
             let minY = Math.min(...rawNewOffsets.map(p => p.y));
             let newOffsets = rawNewOffsets.map(p => ({ x: p.x - minX, y: p.y - minY }));
