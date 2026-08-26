@@ -112,7 +112,7 @@ const InventoryItemRow = React.memo(({ item, isAnySolving, updateItemEffect, upd
                 </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', marginLeft: '8px', alignItems: 'center', gap: '4px' }}>
                 <button
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={() => onToggleLock(item.id, !item.isLocked)}
@@ -140,8 +140,8 @@ const InventoryItemRow = React.memo(({ item, isAnySolving, updateItemEffect, upd
                         border: 'none',
                         color: isAnySolving ? '#444' : '#666',
                         cursor: isAnySolving ? 'not-allowed' : 'pointer',
-                        fontSize: '1.6em',
-                        padding: '10px',
+                        fontSize: '1.4em',
+                        padding: '8px',
                         marginRight: '-5px',
                         display: 'flex',
                         alignItems: 'center',
@@ -1347,7 +1347,7 @@ export default function ModuleInventoryUI() {
                     disabled={inventory.length === 0 && !isAnySolving}
                     style={{
                         padding: '10px 24px',
-                        backgroundColor: isAnySolving ? '#ff4d4d' : '#4caf57',
+                        backgroundColor: isAnySolving ? '#ff4d4d' : '#4caf50',
                         color: 'white',
                         border: isAnySolving ? '1px solid #ff4d4d' : '1px solid #2e4a35',
                         borderRadius: '6px',
@@ -1362,14 +1362,14 @@ export default function ModuleInventoryUI() {
                 <button
                     onClick={handleClearAll}
                     disabled={isAnySolving}
-                    style={{ padding: '10px 24px', backgroundColor: '#2d2d2d', color: '#eee', border: '1px solid #3d3d3d', borderRadius: '6px', cursor: isAnySolving ? 'not-allowed' : 'pointer', fontSize: '0.95em' }}
+                    style={{ padding: '10px 24px', backgroundColor: '#333333', color: '#eee', border: '1px solid #555555', borderRadius: '6px', cursor: isAnySolving ? 'not-allowed' : 'pointer', fontSize: '0.95em' }}
                 >
                     Clear All
                 </button>
                 <button
                     onClick={handleAddMachine}
                     disabled={isAnySolving}
-                    style={{ padding: '10px 24px', backgroundColor: '#2d2d2d', color: '#eee', border: '1px solid #3d3d3d', borderRadius: '6px', cursor: isAnySolving ? 'not-allowed' : 'pointer', fontSize: '0.95em' }}
+                    style={{ padding: '10px 24px', backgroundColor: '#333333', color: '#eee', border: '1px solid #555555', borderRadius: '6px', cursor: isAnySolving ? 'not-allowed' : 'pointer', fontSize: '0.95em' }}
                 >
                     + Add Machine
                 </button>

@@ -1526,9 +1526,7 @@ export function useOptimizer(
     };
 
     const getInventoryForCode = () => {
-        if (!getUsedItems || !machineId) return inventory;
-        const used = getUsedItems(machineId);
-        return inventory.filter(item => !used.has(item.id));
+        return inventory;
     };
 
     const handleTierChange = (newTier: GridTier) => {
@@ -1739,7 +1737,7 @@ export function useOptimizer(
                 // It is an inventory past the 8-bit module count the format allows
                 if (newCode) {
                     if (totals.Performance !== 0 || totals.Quality !== 0 || totals.Efficiency !== 0) {
-                        const timer = setTimeout(() => saveToDatabase(tier, totals, newCode, availableForCode), 10000);
+                        const timer = setTimeout(() => saveToDatabase(tier, totals, newCode, availableForCode), 30000);
                         return () => clearTimeout(timer);
                     }
                 }
