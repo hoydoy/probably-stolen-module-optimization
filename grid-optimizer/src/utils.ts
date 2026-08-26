@@ -1,5 +1,5 @@
 import type {ModuleShape, ModuleColor, Stats, Point, InventoryItem} from './types';
-import { SHAPE_DEFINITIONS } from './constants';
+import { SHAPE_DEFINITIONS } from './constants.ts';
 
 export const getBaseStats = (template: { shape: ModuleShape, color: ModuleColor, displayName: string }): Stats => {
     const stats = { Performance: 0, Quality: 0, Efficiency: 0 };
@@ -7,6 +7,7 @@ export const getBaseStats = (template: { shape: ModuleShape, color: ModuleColor,
 
     const { shape, color, displayName } = template;
 
+    if (displayName.includes('Ruined')) return stats;
     if (displayName.includes('Neural Core (Uncapped)')) return { Performance: 200, Quality: 100, Efficiency: -200 };
     if (displayName.includes('Neural Core (Capped)')) return { Performance: 100, Quality: 50, Efficiency: -100 };
     if (displayName.includes('Alarm Module')) return { Performance: 0, Quality: 0, Efficiency: -50 };
@@ -37,17 +38,15 @@ export const getBaseStats = (template: { shape: ModuleShape, color: ModuleColor,
     return stats;
 };
 
-// Degrading/Learning Algorithm/Premium/Inferior/Overcharged/Negative Feedback (self-boost) all
-// mutate the running stat value, so they must be folded in strict slot order (effects[0] then
-// effects[1]) rather than in two fixed category passes - an effect can change what a later
-// effect in the other slot treats as its "base" (e.g. Premium before Learning Algorithm raises
-// the value Learning Algorithm starts/caps against).
 const computeItemStats = (item: InventoryItem): { effectiveBase: Stats, internal: Stats } => {
     let { Performance: p, Quality: q, Efficiency: e } = getBaseStats(item);
     let effectiveBase: Stats = { Performance: p, Quality: q, Efficiency: e };
-
-    // Flag locks the stat so subsequent % multipliers don't apply twice
     const claimed = { Performance: false, Quality: false, Efficiency: false };
+    const multiply = (factor: number) => {
+        if (!claimed.Performance) p = Math.trunc(p * factor);
+        if (!claimed.Quality) q = Math.trunc(q * factor);
+        if (!claimed.Efficiency) e = Math.trunc(e * factor);
+    };
 
     item.effects.forEach((effect, idx) => {
         const customVal = item.effectValues[idx];
@@ -56,13 +55,11 @@ const computeItemStats = (item: InventoryItem): { effectiveBase: Stats, internal
             if (customVal !== undefined && !isNaN(customVal)) {
                 const truncVal = Math.trunc(customVal);
                 if (p > 0) { p = truncVal; claimed.Performance = true; }
-                else if (p < 0) { p *= 2; }
-
+                else p *= 2;
                 if (q > 0) { q = truncVal; claimed.Quality = true; }
-                else if (q < 0) { q *= 2; }
-
+                else q *= 2;
                 if (e > 0) { e = truncVal; claimed.Efficiency = true; }
-                else if (e < 0) { e *= 2; }
+                else e *= 2;
             }
             effectiveBase = { Performance: p, Quality: q, Efficiency: e };
         }
@@ -81,24 +78,16 @@ const computeItemStats = (item: InventoryItem): { effectiveBase: Stats, internal
             effectiveBase = { Performance: p, Quality: q, Efficiency: e };
         }
         else if (effect === 'Premium') {
-            if (!claimed.Performance) p *= 1.2;
-            if (!claimed.Quality) q *= 1.2;
-            if (!claimed.Efficiency) e *= 1.2;
+            multiply(1.2);
         }
         else if (effect === 'Inferior') {
-            if (!claimed.Performance) p *= 0.8;
-            if (!claimed.Quality) q *= 0.8;
-            if (!claimed.Efficiency) e *= 0.8;
+            multiply(0.8);
         }
         else if (effect === 'Overcharged') {
-            if (!claimed.Performance) p *= 2.0;
-            if (!claimed.Quality) q *= 2.0;
-            if (!claimed.Efficiency) e *= 2.0;
+            multiply(2);
         }
         else if (effect === 'Negative Feedback') {
-            if (!claimed.Performance) p *= 1.25;
-            if (!claimed.Quality) q *= 1.25;
-            if (!claimed.Efficiency) e *= 1.25;
+            multiply(1.25);
         }
     });
 
@@ -106,12 +95,13 @@ const computeItemStats = (item: InventoryItem): { effectiveBase: Stats, internal
 };
 
 export const getEffectiveBaseStats = (item: InventoryItem): Stats => computeItemStats(item).effectiveBase;
-
 export const applyInternalEffects = (item: InventoryItem): Stats => computeItemStats(item).internal;
 
-// fix for floating-point multiplication
-const STAT_EPSILON = 1e-9;
-export const roundStat = (val: number) => val < 0 ? Math.ceil(val - STAT_EPSILON) : Math.floor(val + STAT_EPSILON);
+// Shared by the upstream stat engine; epsilon avoids floating-point values
+// such as 31.999999999 being truncated to the wrong integer.
+export const roundStat = (value: number) => value < 0
+    ? Math.ceil(value - 1e-9)
+    : Math.floor(value + 1e-9);
 
 export const formatStatValue = (val: number) => {
     const rounded = Math.trunc(val);
@@ -161,46 +151,4 @@ const generateAllOffsets = (baseMatrix: number[][]): Point[][] => {
 export const PRECOMPUTED_OFFSETS = new Map<ModuleShape, Point[][]>();
 (Object.keys(SHAPE_DEFINITIONS) as ModuleShape[]).forEach(shape => {
     PRECOMPUTED_OFFSETS.set(shape, generateAllOffsets(SHAPE_DEFINITIONS[shape]));
-});
-
-// Solver-facing view of the same geometry:
-// flat coordinate arrays plus the bounding box of each orientation, so the placement loop can skip out-of-bounds anchors up front instead of re-checking extents for every candidate cell
-export interface Orientation {
-    offsets: Point[];
-    xs: Int8Array;
-    ys: Int8Array;
-    count: number;
-    minX: number;
-    maxX: number;
-    minY: number;
-    maxY: number;
-}
-
-export const PRECOMPUTED_ORIENTATIONS = new Map<ModuleShape, Orientation[]>();
-PRECOMPUTED_OFFSETS.forEach((orientations, shape) => {
-    PRECOMPUTED_ORIENTATIONS.set(shape, orientations.map(offsets => {
-        const count = offsets.length;
-        const xs = new Int8Array(count);
-        const ys = new Int8Array(count);
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (let i = 0; i < count; i++) {
-            const { x, y } = offsets[i];
-            xs[i] = x; ys[i] = y;
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-        }
-        return { offsets, xs, ys, count, minX, maxX, minY, maxY };
-    }));
-});
-
-// matrixToOffsets normalises so the first cell is always the anchor (0,0)
-// The solver relies on that to enumerate candidate anchors from empty cells only
-PRECOMPUTED_ORIENTATIONS.forEach((orientations, shape) => {
-    for (const o of orientations) {
-        if (o.xs[0] !== 0 || o.ys[0] !== 0) {
-            throw new Error(`Orientation for ${shape} is not anchor-normalised`);
-        }
-    }
 });
