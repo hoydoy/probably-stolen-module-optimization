@@ -852,8 +852,8 @@ export const runOptimizationEngine = async (
     // At a 883-piece pool and three machines that is thousands of string hashes per iteration and it dominated the search
     // Everything hot is addressed by pool index instead:
     // the item -> index map is walked once per placed cell (a few dozen), and the per-candidate work becomes a typed-array read
-    const poolIndexOf = new Map<InventoryItem, number>();
-    searchPool.forEach((item, i) => poolIndexOf.set(item, i));
+    const poolIndexOf = new Map<string, number>();
+    searchPool.forEach((item, i) => poolIndexOf.set(item.id, i));
     const ctxByIndex: PlacementContext[] = searchPool.map(item => placementContexts.get(item.id)!);
     const orientationsByIndex = searchPool.map(item => PRECOMPUTED_ORIENTATIONS.get(item.shape));
 
@@ -1206,7 +1206,7 @@ export const runOptimizationEngine = async (
                                     if (removedIds.has(cell.id)) {
                                         board[y][x] = null;
                                     } else {
-                                        const pIdx = poolIndexOf.get(cell);
+                                        const pIdx = poolIndexOf.get(cell.id);
                                         if (pIdx !== undefined) placedMark[pIdx] = markGen;
                                     }
                                 }
@@ -1218,7 +1218,7 @@ export const runOptimizationEngine = async (
                         for (let x = 0; x < 7; x++) {
                             const cell = board[y][x];
                             if (cell && cell !== 'Locked') {
-                                const pIdx = poolIndexOf.get(cell);
+                                const pIdx = poolIndexOf.get(cell.id);
                                 if (pIdx !== undefined) placedMark[pIdx] = markGen;
                             }
                         }
