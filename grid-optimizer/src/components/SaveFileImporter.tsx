@@ -110,10 +110,26 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
 
                 const parsedInventory: InventoryItem[] = [];
                 const newMachines: { id: string, boardIds: (string | null)[][], machineType: string, tier: GridTier }[] = [];
-                const machineContents = new Map<number, { invId: string, modifiedShape: any, parentName: string, parentItem: any }[]>();
+                const machineContents = new Map<number, { invId: string, modifiedShape: any }[]>();
+                const machineDataMap = new Map<number, any>();
 
-                const machineKeywords = ['machine', 'purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm'];
+                const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm'];
 
+                // parse + import machines
+                saveItems.forEach((item: any) => {
+                    const nameLower = (item.name || '').toLowerCase();
+                    const typesStr = item.itemTypes?.join(' ').toLowerCase() || '';
+
+                    const isMachineType = typesStr.includes("machine")
+                    const isActualMachine = machineKeywords.some(kw => nameLower.includes(kw));
+
+                    if (isMachineType && isActualMachine) {
+                        machineContents.set(item.uuid, []);
+                        machineDataMap.set(item.uuid, item);
+                    }
+                });
+
+                // parse + import modules
                 saveItems.forEach((item: any) => {
                     const name = item.name || '';
                     const nameLower = name.toLowerCase();
@@ -260,55 +276,41 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                     });
 
                     const parentId = parentMap.get(item.uuid);
-                    if (parentId !== undefined) {
-                        const parent = itemMap.get(parentId);
-                        if (parent) {
-                            const pName = parent.name.toLowerCase();
-                            const isActualMachine = machineKeywords.some(kw => pName.includes(kw)) && !pName.includes("bay");
-
-                            if (isActualMachine) {
-                                if (!machineContents.has(parentId)) machineContents.set(parentId, []);
-                                machineContents.get(parentId)!.push({
-                                    invId,
-                                    modifiedShape: item.itemModifiedShape,
-                                    parentName: pName,
-                                    parentItem: parent
-                                });
-                            }
-                        }
+                    if (parentId !== undefined && machineContents.has(parentId)) {
+                        machineContents.get(parentId)!.push({
+                            invId,
+                            modifiedShape: item.itemModifiedShape
+                        });
                     }
                 });
 
-                machineContents.forEach((contents) => {
+                machineContents.forEach((contents, machineId) => {
                     const boardIds = Array.from({ length: 5 }, () => Array.from({ length: 7 }, () => null as string | null));
                     let dropdownName = "Select Machine...";
-
                     let machineTier: GridTier = 1;
 
-                    if (contents.length > 0) {
-                        const pName = contents[0].parentName;
-                        const parentItem = contents[0].parentItem;
+                    const parentItem = machineDataMap.get(machineId);
 
-                        if (parentItem) {
-                            const pKeys = parentItem._keys || [];
-                            const pValues = parentItem._values || [];
+                    if (parentItem) {
+                        const pName = (parentItem.name || '').toLowerCase();
+                        const pKeys = parentItem._keys || [];
+                        const pValues = parentItem._values || [];
 
-                            let stageVal: number | null = null;
+                        let stageVal: number | null = null;
 
-                            const upgradeIdx = pKeys.indexOf('MODULE_UPGRADE_STAGE_INT');
-                            if (upgradeIdx !== -1 && pValues[upgradeIdx] !== undefined) {
-                                stageVal = pValues[upgradeIdx].valueInt;
+                        const upgradeIdx = pKeys.indexOf('MODULE_UPGRADE_STAGE_INT');
+                        if (upgradeIdx !== -1 && pValues[upgradeIdx] !== undefined) {
+                            stageVal = pValues[upgradeIdx].valueInt;
+                        }
+                        else if (Array.isArray(pValues)) {
+                            const valObj = pValues.find((v: any) => v?.['<identifier>k__BackingField'] === 'MODULE_UPGRADE_STAGE_INT');
+                            if (valObj && valObj.valueInt !== undefined) {
+                                stageVal = valObj.valueInt;
                             }
-                            else if (Array.isArray(pValues)) {
-                                const valObj = pValues.find((v: any) => v?.['<identifier>k__BackingField'] === 'MODULE_UPGRADE_STAGE_INT');
-                                if (valObj && valObj.valueInt !== undefined) {
-                                    stageVal = valObj.valueInt;
-                                }
-                            }
+                        }
 
-                            if (stageVal !== null && stageVal >= 0 && stageVal <= 2) {
-                                machineTier = (stageVal + 1) as GridTier;
-                            }
+                        if (stageVal !== null && stageVal >= 0 && stageVal <= 2) {
+                            machineTier = (stageVal + 1) as GridTier;
                         }
 
                         if (pName.includes("purifier")) dropdownName = "Water Purifier";
