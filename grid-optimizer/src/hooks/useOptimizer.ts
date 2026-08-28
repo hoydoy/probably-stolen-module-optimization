@@ -1781,7 +1781,7 @@ export function useOptimizer(
                 // It is an inventory past the 8-bit module count the format allows
                 if (newCode) {
                     if (totals.Performance !== 0 || totals.Quality !== 0 || totals.Efficiency !== 0) {
-                        const timer = setTimeout(() => saveToDatabase(tier, totals, newCode, availableForCode), 3000000); // save timer
+                        const timer = setTimeout(() => saveToDatabase(tier, totals, newCode, availableForCode), 30000); // save timer
                         return () => clearTimeout(timer);
                     }
                 }
