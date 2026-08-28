@@ -132,20 +132,33 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         return aX - bX;
                     });
 
-                    const counters: Record<string, number> = {};
+                    const baseCounters: Record<string, number> = {};
+                    const customCounters: Record<string, number> = {};
+
                     children.forEach(child => {
                         let baseName = child.name || 'Unknown';
+                        let isCustom = false;
+                        let resolvedName = baseName;
 
                         const cNameIdx = (child._keys || []).indexOf('CUSTOM_NAME_TAG');
                         if (cNameIdx !== -1 && child._values && child._values[cNameIdx] && child._values[cNameIdx].internalValueString) {
-                            baseName += ` ("${child._values[cNameIdx].internalValueString}")`;
+                            resolvedName = child._values[cNameIdx].internalValueString;
+                            isCustom = true;
                         }
 
                         if (baseName === 'Save Bag') {
                             child.numberedName = 'Inv.';
+                        } else if (isCustom) {
+                            if (customCounters[resolvedName] === undefined) {
+                                customCounters[resolvedName] = 0;
+                                child.numberedName = resolvedName;
+                            } else {
+                                customCounters[resolvedName] += 1;
+                                child.numberedName = `${resolvedName} ${customCounters[resolvedName]}`;
+                            }
                         } else {
-                            counters[baseName] = (counters[baseName] || 0) + 1;
-                            child.numberedName = `${baseName} ${counters[baseName]}`;
+                            baseCounters[resolvedName] = (baseCounters[resolvedName] || 0) + 1;
+                            child.numberedName = `${resolvedName} ${baseCounters[resolvedName]}`;
                         }
                     });
                 });
