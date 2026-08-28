@@ -113,15 +113,53 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                 const machineContents = new Map<number, { invId: string, modifiedShape: any }[]>();
                 const machineDataMap = new Map<number, any>();
 
+                const childrenMap = new Map<number | undefined, any[]>();
+                saveItems.forEach((item: any) => {
+                    const pId = parentMap.get(item.uuid);
+                    if (!childrenMap.has(pId)) childrenMap.set(pId, []);
+                    childrenMap.get(pId)!.push(item);
+                });
+
+                childrenMap.forEach((children) => {
+                    children.sort((a, b) => {
+                        const aShape = a.itemModifiedShape || a.itemShape || {};
+                        const bShape = b.itemModifiedShape || b.itemShape || {};
+                        const aY = aShape['<minY>k__BackingField'] ?? 0;
+                        const bY = bShape['<minY>k__BackingField'] ?? 0;
+                        if (aY !== bY) return aY - bY;
+                        const aX = aShape['<minX>k__BackingField'] ?? 0;
+                        const bX = bShape['<minX>k__BackingField'] ?? 0;
+                        return aX - bX;
+                    });
+
+                    const counters: Record<string, number> = {};
+                    children.forEach(child => {
+                        let baseName = child.name || 'Unknown';
+
+                        const cNameIdx = (child._keys || []).indexOf('CUSTOM_NAME_TAG');
+                        if (cNameIdx !== -1 && child._values && child._values[cNameIdx] && child._values[cNameIdx].internalValueString) {
+                            baseName += ` ("${child._values[cNameIdx].internalValueString}")`;
+                        }
+
+                        if (baseName === 'Save Bag') {
+                            child.numberedName = 'Inv.';
+                        } else {
+                            counters[baseName] = (counters[baseName] || 0) + 1;
+                            child.numberedName = `${baseName} ${counters[baseName]}`;
+                        }
+                    });
+                });
+
                 const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm'];
 
                 // parse + import machines
                 saveItems.forEach((item: any) => {
                     const nameLower = (item.name || '').toLowerCase();
                     const typesStr = item.itemTypes?.join(' ').toLowerCase() || '';
+                    const keysStr = (item._keys || []).join(' ').toLowerCase();
 
-                    const isMachineType = typesStr.includes("machine")
-                    const isActualMachine = machineKeywords.some(kw => nameLower.includes(kw));
+                    const isMachineType = typesStr.includes("machine") || keysStr.includes("standard_machine_tag") || keysStr.includes("machinery");
+                    const isActualMachine = machineKeywords.some(kw => nameLower.includes(kw)) && !nameLower.includes("bay") && !nameLower.includes("box") && !nameLower.includes("crate");
 
                     if (isMachineType && isActualMachine) {
                         machineContents.set(item.uuid, []);
@@ -136,7 +174,7 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                     const _keys = item._keys || [];
                     const typesStr = item.itemTypes?.join(' ').toUpperCase() || '';
 
-                    const allKeysString = (_keys.join(' ') + ' ' + (item._values?.map((v:any) => v.internalValueString || '').join(' ') || '')).toUpperCase();
+                    const allKeysString = (_keys.join(' ') + ' ' + ((item._values || []).map((v:any) => v.internalValueString || '').join(' '))).toUpperCase();
 
                     const isModule = (allKeysString.includes("MODULE") ||
                             allKeysString.includes("BONUS_PERCENTAGE_PERFORMANCE_INT") &&
@@ -264,6 +302,24 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
 
                     const invId = `${shape}_${color}_${Math.random().toString(36).substring(2, 8)}`;
 
+                    let pathStr = '';
+                    let currParentId = parentMap.get(item.uuid);
+                    while (currParentId !== undefined) {
+                        const pNode = itemMap.get(currParentId);
+                        if (pNode) {
+                            let nodeName = pNode.numberedName || pNode.name || 'Unknown';
+                            pathStr = pathStr ? `${nodeName} > ${pathStr}` : nodeName;
+                            currParentId = parentMap.get(pNode.uuid);
+                        } else {
+                            break;
+                        }
+                    }
+                    if (!pathStr) {
+                        pathStr = 'Inv.';
+                    } else if (!pathStr.startsWith('Inv.')) {
+                        pathStr = `Inv. > ${pathStr}`;
+                    }
+
                     parsedInventory.push({
                         id: invId,
                         shape: shape as any,
@@ -272,14 +328,15 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         effects: [eff1, eff2],
                         effectValues: [eff1Val, eff2Val],
                         isInfinite: false,
-                        isLocked: false
-                    });
+                        isLocked: false,
+                        originalPath: pathStr
+                    } as any);
 
                     const parentId = parentMap.get(item.uuid);
                     if (parentId !== undefined && machineContents.has(parentId)) {
                         machineContents.get(parentId)!.push({
                             invId,
-                            modifiedShape: item.itemModifiedShape
+                            modifiedShape: item.itemModifiedShape || item.itemShape
                         });
                     }
                 });
@@ -292,7 +349,6 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                     const parentItem = machineDataMap.get(machineId);
 
                     if (parentItem) {
-                        const pName = (parentItem.name || '').toLowerCase();
                         const pKeys = parentItem._keys || [];
                         const pValues = parentItem._values || [];
 
@@ -313,23 +369,43 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                             machineTier = (stageVal + 1) as GridTier;
                         }
 
-                        if (pName.includes("purifier")) dropdownName = "Water Purifier";
-                        else if (pName.includes("furnace")) dropdownName = "Furnace";
-                        else if (pName.includes("farm")) dropdownName = "Moisture Farm";
-                        else if (pName.includes("agewell")) dropdownName = "AgeWell";
-                        else if (pName.includes("projector")) dropdownName = "Mirage Projector";
-                        else if (pName.includes("desequencer")) dropdownName = "Cryptographic Desequencer";
-                        else if (pName.includes("alarm") || pName.includes("machine")) dropdownName = "Alarm System";
+                        let machinePathStr = '';
+                        let currNodeId: number | undefined = machineId;
+                        while (currNodeId !== undefined) {
+                            const node = itemMap.get(currNodeId);
+                            if (node) {
+                                let nodeName = node.numberedName || node.name || 'Unknown';
+                                machinePathStr = machinePathStr ? `${nodeName} > ${machinePathStr}` : nodeName;
+                                currNodeId = parentMap.get(node.uuid);
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if (machinePathStr) {
+                            dropdownName = machinePathStr;
+                        } else {
+                            const pName = (parentItem.name || '').toLowerCase();
+                            if (pName.includes("purifier")) dropdownName = "Water Purifier";
+                            else if (pName.includes("furnace")) dropdownName = "Furnace";
+                            else if (pName.includes("farm")) dropdownName = "Moisture Farm";
+                            else if (pName.includes("agewell")) dropdownName = "AgeWell";
+                            else if (pName.includes("projector")) dropdownName = "Mirage Projector";
+                            else if (pName.includes("desequencer")) dropdownName = "Cryptographic Desequencer";
+                            else if (pName.includes("alarm") || pName.includes("machine")) dropdownName = "Alarm System";
+                        }
                     }
 
                     contents.forEach(({ invId, modifiedShape }) => {
-                        const w = modifiedShape['<width>k__BackingField'];
-                        const h = modifiedShape['<height>k__BackingField'];
-                        const minX = modifiedShape['<minX>k__BackingField'];
-                        const minY = modifiedShape['<minY>k__BackingField'];
+                        if (!modifiedShape) return;
+
+                        const w = modifiedShape['<width>k__BackingField'] ?? 1;
+                        const h = modifiedShape['<height>k__BackingField'] ?? 1;
+                        const minX = modifiedShape['<minX>k__BackingField'] ?? 0;
+                        const minY = modifiedShape['<minY>k__BackingField'] ?? 0;
                         const orientation = modifiedShape['<orientation>k__BackingField'] || 0;
                         const flipped = modifiedShape['<flipped>k__BackingField'] || false;
-                        const data = modifiedShape.data;
+                        const data = modifiedShape.data || [];
 
                         const pts = getTransformedPoints(w, h, data, orientation, flipped);
 

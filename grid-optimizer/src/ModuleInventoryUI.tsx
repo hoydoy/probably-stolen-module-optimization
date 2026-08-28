@@ -176,6 +176,7 @@ const MachineInstance = React.memo(forwardRef(({
     // Machine state loading handles fallback defaults from localStorage automatically
     const optimizer = useOptimizer(inventory, setInventory, machineId, getUsedItems, 3, isAnySolving);
     const [localHover, setLocalHover] = useState<{x: number, y: number} | null>(null);
+    const [showPaths, setShowPaths] = useState(false);
 
     // Automatically load the machine name from save file
     const [machineType, setMachineType] = useState(() => {
@@ -187,6 +188,17 @@ const MachineInstance = React.memo(forwardRef(({
             localStorage.setItem(`optimizer_machine_type_${machineId}`, machineType);
         }
     }, [machineType, machineId]);
+
+    const uniqueModules = useMemo(() => {
+        if (!showPaths) return [];
+        const mods = new Map<string, InventoryItem>();
+        optimizer.board.forEach(row => row.forEach(cell => {
+            if (cell && cell !== 'Locked') {
+                mods.set(cell.id, cell as InventoryItem);
+            }
+        }));
+        return Array.from(mods.values());
+    }, [showPaths, optimizer.board]);
 
     useImperativeHandle(ref, () => ({
         run: optimizer.runOptimization,
@@ -301,322 +313,391 @@ const MachineInstance = React.memo(forwardRef(({
     return (
         <div style={{
             position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center',
-            backgroundColor: '#111', border: '1px solid #333', borderRadius: '8px', padding: '15px',
+            backgroundColor: '#111', border: '1px solid #333', borderRadius: '8px', padding: '40px 15px 15px 15px',
             width: 'max-content', boxSizing: 'border-box'
         }}>
 
-            {canDelete && (
+            <div style={{ position: 'absolute', top: '6px', left: '15px', right: '10px', display: 'flex', justifyContent: 'space-between', zIndex: 10, alignItems: 'center' }}>
                 <button
-                    onClick={() => onDelete(machineId)}
-                    disabled={optimizer.isSolving || isAnySolving}
+                    onClick={() => setShowPaths(!showPaths)}
                     style={{
-                        position: 'absolute', top: '8px', right: '10px', background: 'none',
-                        border: 'none', color: (optimizer.isSolving || isAnySolving) ? '#444' : '#666',
-                        cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer',
-                        fontSize: '1.2em', padding: '0', zIndex: 10
+                        background: showPaths ? '#333' : 'transparent', border: '1px solid #555',
+                        borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '0.75em',
+                        padding: '4px 8px', fontWeight: 'bold'
                     }}
-                    title="Delete Machine"
                 >
-                    &times;
+                    {showPaths ? 'Hide Paths' : 'Show Paths'}
                 </button>
-            )}
-
-            <div className="stats-header" style={{ width: '100%', boxSizing: 'border-box', marginBottom: '10px', padding: '10px 15px', gap: '10px', justifyContent: 'space-around' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <span style={{ color: '#aaa', fontSize: '0.7em', textTransform: 'uppercase' }}>Performance</span>
-                    <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: getStatColor(optimizer.bestTotals.Performance) }}>
-                        {formatStatValue(optimizer.bestTotals.Performance)}
-                    </div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                    <span style={{ color: '#aaa', fontSize: '0.7em', textTransform: 'uppercase' }}>Quality</span>
-                    <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: getStatColor(optimizer.bestTotals.Quality) }}>
-                        {formatStatValue(optimizer.bestTotals.Quality)}
-                    </div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                    <span style={{ color: '#aaa', fontSize: '0.7em', textTransform: 'uppercase' }}>Efficiency</span>
-                    <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: getStatColor(optimizer.bestTotals.Efficiency) }}>
-                        {formatStatValue(optimizer.bestTotals.Efficiency)}
-                    </div>
-                </div>
+                {canDelete && (
+                    <button
+                        onClick={() => onDelete(machineId)}
+                        disabled={optimizer.isSolving || isAnySolving}
+                        style={{
+                            background: 'none', border: 'none', color: (optimizer.isSolving || isAnySolving) ? '#444' : '#666',
+                            cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer', fontSize: '1.2em', padding: '4px 4px'
+                        }}
+                        title="Delete Machine"
+                    >
+                        &times;
+                    </button>
+                )}
             </div>
 
-            <div
-                className="grid-wrapper"
-                onMouseLeave={() => {
-                    if (dragState) {
-                        setLocalHover(null);
-                        onDragTargetRefChange(null);
-                    }
-                }}
-                style={{
-                    gridTemplateColumns: `repeat(7, ${cellSize}px)`,
-                    gridTemplateRows: `repeat(5, ${cellSize}px)`
-                }}
-            >
-                {optimizer.board.map((row: any, y: number) =>
-                    row.map((cell: any, x: number) => {
-                        let isPreviewCell = false;
+            <div style={{ visibility: showPaths ? 'hidden' : 'visible', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div className="stats-header" style={{ width: '100%', boxSizing: 'border-box', marginBottom: '10px', padding: '10px 15px', gap: '10px', justifyContent: 'space-around' }}>
+                    <div style={{ textAlign: 'center' }}>
+                        <span style={{ color: '#aaa', fontSize: '0.7em', textTransform: 'uppercase' }}>Performance</span>
+                        <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: getStatColor(optimizer.bestTotals.Performance) }}>
+                            {formatStatValue(optimizer.bestTotals.Performance)}
+                        </div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                        <span style={{ color: '#aaa', fontSize: '0.7em', textTransform: 'uppercase' }}>Quality</span>
+                        <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: getStatColor(optimizer.bestTotals.Quality) }}>
+                            {formatStatValue(optimizer.bestTotals.Quality)}
+                        </div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                        <span style={{ color: '#aaa', fontSize: '0.7em', textTransform: 'uppercase' }}>Efficiency</span>
+                        <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: getStatColor(optimizer.bestTotals.Efficiency) }}>
+                            {formatStatValue(optimizer.bestTotals.Efficiency)}
+                        </div>
+                    </div>
+                </div>
 
-                        if (isTargetingThis && previewRootX !== null && previewRootY !== null) {
-                            for (const pt of dragState.offsets) {
-                                if (previewRootX + pt.x === x && previewRootY + pt.y === y) {
-                                    isPreviewCell = true;
-                                    break;
+                <div
+                    className="grid-wrapper"
+                    onMouseLeave={() => {
+                        if (dragState) {
+                            setLocalHover(null);
+                            onDragTargetRefChange(null);
+                        }
+                    }}
+                    style={{
+                        gridTemplateColumns: `repeat(7, ${cellSize}px)`,
+                        gridTemplateRows: `repeat(5, ${cellSize}px)`
+                    }}
+                >
+                    {optimizer.board.map((row: any, y: number) =>
+                        row.map((cell: any, x: number) => {
+                            let isPreviewCell = false;
+
+                            if (isTargetingThis && previewRootX !== null && previewRootY !== null) {
+                                for (const pt of dragState.offsets) {
+                                    if (previewRootX + pt.x === x && previewRootY + pt.y === y) {
+                                        isPreviewCell = true;
+                                        break;
+                                    }
                                 }
                             }
-                        }
 
-                        const isBeingDragged = dragState && dragState.sourceMachineId === machineId && cell && cell !== 'Locked' && dragState.item.id === cell.id;
+                            const isBeingDragged = dragState && dragState.sourceMachineId === machineId && cell && cell !== 'Locked' && dragState.item.id === cell.id;
 
-                        return (
-                            <div
-                                key={`${x}-${y}`}
-                                onMouseMove={(e) => {
-                                    if (cell && cell !== 'Locked' && !dragState) {
-                                        setHoverInfo({ x: e.clientX, y: e.clientY, cell, stats: optimizer.bestPieceStats.get(cell.id) });
-                                    }
-                                }}
-                                onMouseLeave={() => setHoverInfo(null)}
-                                onMouseDown={(e) => {
-                                    if (optimizer.isSolving || isAnySolving || !cell || cell === 'Locked') return;
-                                    e.preventDefault();
-                                    const footprint = getBoardFootprint(cell.id);
-                                    if (!footprint) return;
-
-                                    setHoverInfo(null);
-
-                                    // prevent cursor being outside the grid when placing module by having the cursor drag modules from the center-most square (center of mass)
-                                    const avgX = footprint.offsets.reduce((sum: number, p: Point) => sum + p.x, 0) / footprint.offsets.length;
-                                    const avgY = footprint.offsets.reduce((sum: number, p: Point) => sum + p.y, 0) / footprint.offsets.length;
-
-                                    let pivot = footprint.offsets[0];
-                                    let minDist = Infinity;
-                                    for (const p of footprint.offsets) {
-                                        const dist = (p.x - avgX) ** 2 + (p.y - avgY) ** 2;
-                                        if (dist < minDist) {
-                                            minDist = dist;
-                                            pivot = p;
+                            return (
+                                <div
+                                    key={`${x}-${y}`}
+                                    onMouseMove={(e) => {
+                                        if (cell && cell !== 'Locked' && !dragState) {
+                                            setHoverInfo({ x: e.clientX, y: e.clientY, cell, stats: optimizer.bestPieceStats.get(cell.id) });
                                         }
-                                    }
+                                    }}
+                                    onMouseLeave={() => setHoverInfo(null)}
+                                    onMouseDown={(e) => {
+                                        if (optimizer.isSolving || isAnySolving || !cell || cell === 'Locked') return;
+                                        e.preventDefault();
+                                        const footprint = getBoardFootprint(cell.id);
+                                        if (!footprint) return;
 
-                                    const dragOffsetX = pivot.x;
-                                    const dragOffsetY = pivot.y;
+                                        setHoverInfo(null);
 
-                                    const initialTarget = {
-                                        machineId,
-                                        x: footprint.minX + dragOffsetX,
-                                        y: footprint.minY + dragOffsetY
-                                    };
+                                        // prevent cursor being outside the grid when placing module by having the cursor drag modules from the center-most square (center of mass)
+                                        const avgX = footprint.offsets.reduce((sum: number, p: Point) => sum + p.x, 0) / footprint.offsets.length;
+                                        const avgY = footprint.offsets.reduce((sum: number, p: Point) => sum + p.y, 0) / footprint.offsets.length;
 
-                                    const evt = new CustomEvent('appDragStart', {
-                                        detail: {
-                                            item: cell,
-                                            sourceMachineId: machineId,
-                                            offsets: footprint.offsets,
-                                            dragOffsetX,
-                                            dragOffsetY,
-                                            initialMouseX: e.clientX,
-                                            initialMouseY: e.clientY,
-                                            initialTarget
-                                        }
-                                    });
-                                    window.dispatchEvent(evt);
-                                }}
-                                onMouseEnter={() => {
-                                    if (dragState) {
-                                        setLocalHover({ x, y });
-                                        onDragTargetRefChange({ machineId, x, y });
-                                    }
-                                }}
-                                style={{
-                                    width: `${cellSize}px`,
-                                    height: `${cellSize}px`,
-                                    ...getCellStyles(x, y, cell),
-                                    opacity: isBeingDragged ? 0.3 : 1,
-                                    cursor: cell && cell !== 'Locked' ? ((optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'grab') : 'default',
-                                    boxSizing: 'border-box',
-                                    position: 'relative'
-                                }}
-                            >
-                                {isPreviewCell && (
-                                    <div style={{
-                                        position: 'absolute', inset: 0,
-                                        backgroundColor: currentPreviewValid ? 'rgba(20, 80, 20, 0.85)' : 'rgba(80, 20, 20, 0.85)',
-                                        border: currentPreviewValid ? '2px solid rgba(100, 255, 100, 0.5)' : '2px solid rgba(255, 100, 100, 0.5)',
-                                        zIndex: 10, pointerEvents: 'none'
-                                    }} />
-                                )}
-                            </div>
-                        );
-                    })
-                )}
-            </div>
-
-            <div style={{ minHeight: '18px', marginTop: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                {optimizer.warningMsg && (
-                    <span style={{ color: '#ff4d4d', fontSize: '0.75em', textAlign: 'center', width: '100%' }}>
-                        ⚠ {optimizer.warningMsg}
-                    </span>
-                )}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
-                <select
-                    value={machineType}
-                    onChange={(e) => setMachineType(e.target.value)}
-                    disabled={optimizer.isSolving || isAnySolving}
-                    style={{
-                        width: '100%', padding: '6px 8px', backgroundColor: '#222', color: '#eee',
-                        border: '1px solid #333', borderRadius: '6px', fontSize: '0.85em',
-                        outline: 'none', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer'
-                    }}
-                >
-                    <option value="Select Machine..." disabled>Select Machine...</option>
-                    <option value="Moisture Farm">Moisture Farm</option>
-                    <option value="Furnace">Furnace</option>
-                    <option value="Water Purifier">Water Purifier</option>
-                    <option value="Alarm System">Alarm System</option>
-                    <option value="AgeWell">AgeWell</option>
-                    <option value="Cryptographic Desequencer">Cryptographic Desequencer</option>
-                    <option value="Mirage Projector">Mirage Projector</option>
-                </select>
-
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                    <div style={{ display: 'flex', gap: '5px', backgroundColor: '#222', padding: '5px', borderRadius: '6px' }}>
-                        {[1, 2, 3].map((t) => (
-                            <button key={t} onClick={() => optimizer.handleTierChange(t as GridTier)} disabled={optimizer.isSolving || isAnySolving} style={{ padding: '6px 12px', fontSize: '0.85em', backgroundColor: optimizer.tier === t ? '#555' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}>
-                                Tier {t}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '5px', backgroundColor: '#222', padding: '6px 8px', borderRadius: '6px', border: '1px solid #333', justifyContent: 'space-between', width: '100%', boxSizing: 'border-box' }}>
-                    {(['Performance', 'Quality', 'Efficiency'] as const).map((stat, idx) => (
-                        <div key={stat} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', flex: 1, borderRight: idx < 2 ? '1px solid #444' : 'none' }}>
-                            <span style={{ fontSize: '0.6em', color: '#aaa', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>{stat}</span>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <label style={{ fontSize: '0.7em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer', opacity: optimizer.ignoreStats[stat] ? 0.4 : 1 }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={optimizer.maximizeStats[stat]}
-                                        onChange={() => optimizer.setMaximizeStats((prev: any) => ({ ...prev, [stat]: !prev[stat] }))}
-                                        disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
-                                        style={{ margin: 0, cursor: (optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
-                                    /> Max
-                                </label>
-                                <label
-                                    title={`Ignore ${stat} entirely — it stops counting toward the score in either direction, so the optimizer is free to let it go as negative as it likes.`}
-                                    style={{ fontSize: '0.7em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={optimizer.ignoreStats[stat]}
-                                        onChange={() => optimizer.setIgnoreStats((prev: any) => {
-                                            const next = { ...prev, [stat]: !prev[stat] };
-                                            if (next[stat]) {
-                                                optimizer.setMaximizeStats((m: any) => ({ ...m, [stat]: false }));
-                                                optimizer.setTargetStats((t: any) => ({ ...t, [stat]: null }));
+                                        let pivot = footprint.offsets[0];
+                                        let minDist = Infinity;
+                                        for (const p of footprint.offsets) {
+                                            const dist = (p.x - avgX) ** 2 + (p.y - avgY) ** 2;
+                                            if (dist < minDist) {
+                                                minDist = dist;
+                                                pivot = p;
                                             }
-                                            return next;
-                                        })}
-                                        disabled={optimizer.isSolving || isAnySolving}
-                                        style={{ margin: 0, cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
-                                    /> Ign
-                                </label>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px', opacity: optimizer.ignoreStats[stat] ? 0.4 : 1 }}>
-                                <span style={{ fontSize: '0.65em', color: '#888' }}>Tar:</span>
-                                <input
-                                    type="number"
-                                    value={optimizer.targetStats[stat] ?? ''}
-                                    onChange={(e) => optimizer.setTargetStats((prev: any) => ({ ...prev, [stat]: e.target.value === '' ? null : Number(e.target.value) }))}
-                                    disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
-                                    style={{ width: '35px', padding: '2px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', textAlign: 'center' }}
-                                />
-                                <span style={{ fontSize: '0.65em', color: '#888' }}>%</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px', opacity: optimizer.ignoreStats[stat] ? 0.4 : 1 }}>
-                                <span style={{ fontSize: '0.65em', color: '#888' }}>Pri:</span>
-                                <select
-                                    title={`Priority for ${stat} — 1 matters most.`}
-                                    value={optimizer.statPriority[stat]}
-                                    onChange={(e) => optimizer.setStatPriority((prev: StatRanks) => ({ ...prev, [stat]: Number(e.target.value) }))}
-                                    disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
-                                    style={{ padding: '1px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', cursor: (optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
+                                        }
+
+                                        const dragOffsetX = pivot.x;
+                                        const dragOffsetY = pivot.y;
+
+                                        const initialTarget = {
+                                            machineId,
+                                            x: footprint.minX + dragOffsetX,
+                                            y: footprint.minY + dragOffsetY
+                                        };
+
+                                        const evt = new CustomEvent('appDragStart', {
+                                            detail: {
+                                                item: cell,
+                                                sourceMachineId: machineId,
+                                                offsets: footprint.offsets,
+                                                dragOffsetX,
+                                                dragOffsetY,
+                                                initialMouseX: e.clientX,
+                                                initialMouseY: e.clientY,
+                                                initialTarget
+                                            }
+                                        });
+                                        window.dispatchEvent(evt);
+                                    }}
+                                    onMouseEnter={() => {
+                                        if (dragState) {
+                                            setLocalHover({ x, y });
+                                            onDragTargetRefChange({ machineId, x, y });
+                                        }
+                                    }}
+                                    style={{
+                                        width: `${cellSize}px`,
+                                        height: `${cellSize}px`,
+                                        ...getCellStyles(x, y, cell),
+                                        opacity: isBeingDragged ? 0.3 : 1,
+                                        cursor: cell && cell !== 'Locked' ? ((optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'grab') : 'default',
+                                        boxSizing: 'border-box',
+                                        position: 'relative'
+                                    }}
                                 >
-                                    <option value={1}>1</option>
-                                    <option value={2}>2</option>
-                                    <option value={3}>3</option>
-                                </select>
-                            </div>
-                        </div>
-                    ))}
+                                    {isPreviewCell && (
+                                        <div style={{
+                                            position: 'absolute', inset: 0,
+                                            backgroundColor: currentPreviewValid ? 'rgba(20, 80, 20, 0.85)' : 'rgba(80, 20, 20, 0.85)',
+                                            border: currentPreviewValid ? '2px solid rgba(100, 255, 100, 0.5)' : '2px solid rgba(255, 100, 100, 0.5)',
+                                            zIndex: 10, pointerEvents: 'none'
+                                        }} />
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
                 </div>
 
-                <div style={{ display: 'flex', gap: '5px', width: '100%' }}>
-                    <button
-                        onClick={optimizer.isSolving ? optimizer.stopOptimization : optimizer.runOptimization}
-                        disabled={(inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)}
+                <div style={{ minHeight: '18px', marginTop: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                    {optimizer.warningMsg && (
+                        <span style={{ color: '#ff4d4d', fontSize: '0.75em', textAlign: 'center', width: '100%' }}>
+                            ⚠ {optimizer.warningMsg}
+                        </span>
+                    )}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+                    <select
+                        title={machineType !== "Select Machine..." ? machineType : undefined}
+                        value={machineType}
+                        onChange={(e) => {
+                            const selected = e.target.value;
+                            const allKeys = Object.keys(localStorage).filter(k => k.startsWith('optimizer_machine_type_'));
+                            let max = 0;
+
+                            const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const regex = new RegExp(`(?:^|\\s|>\\s*)${escapeRegex(selected)}\\s+(\\d+)$`);
+
+                            allKeys.forEach(k => {
+                                if (k === `optimizer_machine_type_${machineId}`) return;
+                                const val = localStorage.getItem(k);
+                                if (val) {
+                                    const match = val.match(regex);
+                                    if (match) {
+                                        const num = parseInt(match[1], 10);
+                                        if (num > max) max = num;
+                                    }
+                                }
+                            });
+                            setMachineType(`${selected} ${max + 1}`);
+                        }}
+                        disabled={optimizer.isSolving || isAnySolving}
                         style={{
-                            flex: 2, padding: '8px', fontSize: '0.85em',
-                            backgroundColor: optimizer.isSolving ? '#ff4d4d' : '#4caf50',
-                            color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold',
-                            cursor: ((inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)) ? 'not-allowed' : 'pointer',
-                            opacity: ((inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)) ? 0.5 : 1
+                            width: '100%', padding: '6px 8px', backgroundColor: '#222', color: '#eee',
+                            border: '1px solid #333', borderRadius: '6px', fontSize: '0.85em',
+                            outline: 'none', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer',
+                            textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden'
                         }}
                     >
-                        {optimizer.isSolving ? 'Stop Optimizer' : 'Run Optimizer'}
-                    </button>
-                    <button
-                        onClick={optimizer.resetBoard}
-                        disabled={optimizer.isSolving || isAnySolving}
-                        style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
-                    >
-                        Clear
-                    </button>
-                    <button
-                        onClick={() => onDuplicate(machineId)}
-                        disabled={optimizer.isSolving || isAnySolving}
-                        style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
-                    >
-                        Duplicate
-                    </button>
-                </div>
+                        <option value="Select Machine..." disabled>Select Machine...</option>
+                        {machineType !== "Select Machine..." && !["Moisture Farm", "Furnace", "Water Purifier", "Alarm System", "AgeWell", "Cryptographic Desequencer", "Mirage Projector"].includes(machineType) && (
+                            <option value={machineType}>
+                                {machineType.length > 45 ? '...' + machineType.substring(machineType.length - 39) : machineType}
+                            </option>
+                        )}
+                        <option value="Moisture Farm">Moisture Farm</option>
+                        <option value="Furnace">Furnace</option>
+                        <option value="Water Purifier">Water Purifier</option>
+                        <option value="Alarm System">Alarm System</option>
+                        <option value="AgeWell">AgeWell</option>
+                        <option value="Cryptographic Desequencer">Cryptographic Desequencer</option>
+                        <option value="Mirage Projector">Mirage Projector</option>
+                    </select>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ fontSize: '0.75em', color: '#888' }}>Code:</span>
-                        <input
-                            type="text"
-                            value={optimizer.solutionCode}
-                            onChange={(e) => optimizer.setSolutionCode(e.target.value)}
-                            placeholder="Solution code..."
-                            disabled={optimizer.isSolving || isAnySolving}
-                            style={{ flex: 1, minWidth: 0, padding: '6px', fontSize: '0.75em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '4px' }}
-                        />
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <div style={{ display: 'flex', gap: '5px', backgroundColor: '#222', padding: '5px', borderRadius: '6px' }}>
+                            {[1, 2, 3].map((t) => (
+                                <button key={t} onClick={() => optimizer.handleTierChange(t as GridTier)} disabled={optimizer.isSolving || isAnySolving} style={{ padding: '6px 12px', fontSize: '0.85em', backgroundColor: optimizer.tier === t ? '#555' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}>
+                                    Tier {t}
+                                </button>
+                            ))}
+                        </div>
                     </div>
+
+                    <div style={{ display: 'flex', gap: '5px', backgroundColor: '#222', padding: '6px 8px', borderRadius: '6px', border: '1px solid #333', justifyContent: 'space-between', width: '100%', boxSizing: 'border-box' }}>
+                        {(['Performance', 'Quality', 'Efficiency'] as const).map((stat, idx) => (
+                            <div key={stat} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', flex: 1, borderRight: idx < 2 ? '1px solid #444' : 'none' }}>
+                                <span style={{ fontSize: '0.6em', color: '#aaa', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>{stat}</span>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <label style={{ fontSize: '0.7em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer', opacity: optimizer.ignoreStats[stat] ? 0.4 : 1 }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={optimizer.maximizeStats[stat]}
+                                            onChange={() => optimizer.setMaximizeStats((prev: any) => ({ ...prev, [stat]: !prev[stat] }))}
+                                            disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
+                                            style={{ margin: 0, cursor: (optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
+                                        /> Max
+                                    </label>
+                                    <label
+                                        title={`Ignore ${stat} entirely — it stops counting toward the score in either direction, so the optimizer is free to let it go as negative as it likes.`}
+                                        style={{ fontSize: '0.7em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', cursor: 'pointer' }}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={optimizer.ignoreStats[stat]}
+                                            onChange={() => optimizer.setIgnoreStats((prev: any) => {
+                                                const next = { ...prev, [stat]: !prev[stat] };
+                                                if (next[stat]) {
+                                                    optimizer.setMaximizeStats((m: any) => ({ ...m, [stat]: false }));
+                                                    optimizer.setTargetStats((t: any) => ({ ...t, [stat]: null }));
+                                                }
+                                                return next;
+                                            })}
+                                            disabled={optimizer.isSolving || isAnySolving}
+                                            style={{ margin: 0, cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                                        /> Ign
+                                    </label>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px', opacity: optimizer.ignoreStats[stat] ? 0.4 : 1 }}>
+                                    <span style={{ fontSize: '0.65em', color: '#888' }}>Tar:</span>
+                                    <input
+                                        type="number"
+                                        value={optimizer.targetStats[stat] ?? ''}
+                                        onChange={(e) => optimizer.setTargetStats((prev: any) => ({ ...prev, [stat]: e.target.value === '' ? null : Number(e.target.value) }))}
+                                        disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
+                                        style={{ width: '35px', padding: '2px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', textAlign: 'center' }}
+                                    />
+                                    <span style={{ fontSize: '0.65em', color: '#888' }}>%</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px', opacity: optimizer.ignoreStats[stat] ? 0.4 : 1 }}>
+                                    <span style={{ fontSize: '0.65em', color: '#888' }}>Pri:</span>
+                                    <select
+                                        title={`Priority for ${stat} — 1 matters most.`}
+                                        value={optimizer.statPriority[stat]}
+                                        onChange={(e) => optimizer.setStatPriority((prev: StatRanks) => ({ ...prev, [stat]: Number(e.target.value) }))}
+                                        disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
+                                        style={{ padding: '1px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', cursor: (optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
+                                    >
+                                        <option value={1}>1</option>
+                                        <option value={2}>2</option>
+                                        <option value={3}>3</option>
+                                    </select>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
                     <div style={{ display: 'flex', gap: '5px', width: '100%' }}>
                         <button
-                            onClick={() => optimizer.importSolution(optimizer.solutionCode)}
-                            disabled={!optimizer.solutionCode || optimizer.isSolving || isAnySolving}
-                            style={{ flex: 1, padding: '6px', fontSize: '0.8em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', cursor: (!optimizer.solutionCode || optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                            onClick={optimizer.isSolving ? optimizer.stopOptimization : optimizer.runOptimization}
+                            disabled={(inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)}
+                            style={{
+                                flex: 2, padding: '8px', fontSize: '0.85em',
+                                backgroundColor: optimizer.isSolving ? '#ff4d4d' : '#4caf50',
+                                color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold',
+                                cursor: ((inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)) ? 'not-allowed' : 'pointer',
+                                opacity: ((inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)) ? 0.5 : 1
+                            }}
                         >
-                            Import
+                            {optimizer.isSolving ? 'Stop Optimizer' : 'Run Optimizer'}
                         </button>
                         <button
-                            onClick={() => navigator.clipboard.writeText(optimizer.solutionCode)}
-                            disabled={!optimizer.solutionCode}
-                            style={{ flex: 1, padding: '6px', fontSize: '0.8em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', cursor: !optimizer.solutionCode ? 'not-allowed' : 'pointer' }}
+                            onClick={optimizer.resetBoard}
+                            disabled={optimizer.isSolving || isAnySolving}
+                            style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
                         >
-                            Copy
+                            Clear
+                        </button>
+                        <button
+                            onClick={() => onDuplicate(machineId)}
+                            disabled={optimizer.isSolving || isAnySolving}
+                            style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                        >
+                            Duplicate
                         </button>
                     </div>
-                </div>
 
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', width: '100%', boxSizing: 'border-box' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flex: '7' }}>
+                            <span style={{ fontSize: '0.75em', color: '#888' }}>Code:</span>
+                            <input
+                                type="text"
+                                value={optimizer.solutionCode}
+                                onChange={(e) => optimizer.setSolutionCode(e.target.value)}
+                                placeholder="Solution code..."
+                                disabled={optimizer.isSolving || isAnySolving}
+                                style={{ flex: 1, minWidth: 0, padding: '6px', fontSize: '0.75em', backgroundColor: '#111', color: '#eee', border: '1px solid #555', borderRadius: '6px' }}
+                            />
+                        </div>
+                        <div style={{ display: 'flex', gap: '5px', flex: '3' }}>
+                            <button
+                                onClick={() => optimizer.importSolution(optimizer.solutionCode)}
+                                disabled={!optimizer.solutionCode || optimizer.isSolving || isAnySolving}
+                                style={{ flex: 1, padding: '6px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (!optimizer.solutionCode || optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                            >
+                                Import
+                            </button>
+                            <button
+                                onClick={() => navigator.clipboard.writeText(optimizer.solutionCode)}
+                                disabled={!optimizer.solutionCode}
+                                style={{ flex: 1, padding: '6px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: !optimizer.solutionCode ? 'not-allowed' : 'pointer' }}
+                            >
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            {showPaths && (
+                <div style={{
+                    position: 'absolute', top: '40px', left: '15px', right: '15px', bottom: '15px',
+                    backgroundColor: '#1a1a1a', borderRadius: '6px', border: '1px solid #333',
+                    overflowY: 'auto', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px',
+                    zIndex: 5
+                }}>
+                    <h4 style={{ margin: '0 0 10px 0', color: '#ccc', textAlign: 'center', fontSize: '0.9em', textTransform: 'uppercase' }}>Module Paths</h4>
+                    {uniqueModules.length > 0 ? uniqueModules.map(mod => {
+                        const effs = mod.effects.filter(e => e !== 'None');
+                        const effStr = effs.length > 0
+                            ? ` (${effs.map(e => `${e}${e === 'Learning Algorithm' || e === 'Degrading' ? ` ${mod.effectValues[mod.effects.indexOf(e)]}%` : ''}`).join(', ')})`
+                            : '';
+                        const actualPath = (mod as any).originalPath || 'Manual';
+
+                        return (
+                            <div key={mod.id} style={{ padding: '8px', backgroundColor: '#252526', borderRadius: '4px', borderLeft: `3px solid ${COLOR_MAP[mod.color as ModuleColor]}` }}>
+                                <div style={{ fontWeight: 'bold', fontSize: '0.85em', color: '#eee', marginBottom: '4px' }}>
+                                    {mod.displayName}<span style={{ color: '#aaa', fontWeight: 'normal' }}>{effStr}</span>
+                                </div>
+                                <div style={{ fontSize: '0.75em', color: '#888', wordBreak: 'break-word' }}>
+                                    {actualPath}
+                                </div>
+                            </div>
+                        );
+                    }) : (
+                        <div style={{ color: '#888', fontSize: '0.85em', textAlign: 'center', marginTop: '20px' }}>No modules placed.</div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }))
@@ -639,8 +720,9 @@ const createInventoryItem = (template: ModuleTemplate): InventoryItem => {
         color: template.color,
         displayName: template.displayName,
         effects: ['None', 'None'],
-        effectValues: [defaultDoubleBase, defaultDoubleBase]
-    };
+        effectValues: [defaultDoubleBase, defaultDoubleBase],
+        originalPath: 'Manual'
+    } as any;
 };
 
 export default function ModuleInventoryUI() {
@@ -693,7 +775,7 @@ export default function ModuleInventoryUI() {
     const [filterGroup, setFilterGroup] = useState<FilterGroup>('All');
     const [filterSize, setFilterSize] = useState<'All' | 3 | 4 | 5>('All');
 
-    const [invFilterGroup, setInvFilterGroup] = useState<FilterGroup | 'Placed'>('All');
+    const [invFilterGroup, setInvFilterGroup] = useState<FilterGroup | 'Placed' | 'NotPlaced'>('All');
     const [invFilterSize, setInvFilterSize] = useState<'All' | 3 | 4 | 5>('All');
     const [invFilterEffect, setInvFilterEffect] = useState<ItemEffect | 'All'>('All');
 
@@ -1027,6 +1109,9 @@ export default function ModuleInventoryUI() {
         if (invFilterGroup === 'Placed') {
             const isPlaced = allUsedItems.has(item.id) || (item.isInfinite && Array.from(allUsedItems).some(usedId => usedId.startsWith(item.id + '_clone_')));
             if (!isPlaced) return false;
+        } else if (invFilterGroup === 'NotPlaced') {
+            const isPlaced = allUsedItems.has(item.id) || (item.isInfinite && Array.from(allUsedItems).some(usedId => usedId.startsWith(item.id + '_clone_')));
+            if (isPlaced) return false;
         } else if (invFilterGroup !== 'All') {
             const template = MODULE_TEMPLATES.find(m => m.shape === item.shape && m.color === item.color);
             const group = template ? template.group : 'All';
@@ -1210,6 +1295,7 @@ export default function ModuleInventoryUI() {
             return next;
         });
         localStorage.removeItem(`optimizer_machine_${machineId}`);
+        localStorage.removeItem(`optimizer_machine_type_${machineId}`);
     }, []);
 
     const handleSolvingChange = useCallback((id: string, solving: boolean) => {
@@ -1589,9 +1675,10 @@ export default function ModuleInventoryUI() {
 
                     {/* Inventory Filters */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-                        <select value={invFilterGroup} onChange={(e) => setInvFilterGroup(e.target.value as FilterGroup | 'Placed')} style={{ flex: 1, minWidth: '110px', padding: '6px', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', outline: 'none', fontSize: '0.8em' }}>
+                        <select value={invFilterGroup} onChange={(e) => setInvFilterGroup(e.target.value as FilterGroup | 'Placed' | 'NotPlaced')} style={{ flex: 1, minWidth: '110px', padding: '6px', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', outline: 'none', fontSize: '0.8em' }}>
                             <option value="All">All Groups</option>
                             <option value="Placed">Placed in Machine</option>
+                            <option value="NotPlaced">Not Placed in Machine</option>
                             <option value="Performance">Performance</option>
                             <option value="Quality">Quality</option>
                             <option value="Efficiency">Efficiency</option>
