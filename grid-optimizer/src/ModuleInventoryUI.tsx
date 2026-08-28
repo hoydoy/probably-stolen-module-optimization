@@ -1493,6 +1493,12 @@ export default function ModuleInventoryUI() {
                     ) : (
                         <div style={{ color: '#888', fontSize: '0.9em' }}>Calculating...</div>
                     )}
+
+                    {hoveredItem.originalPath && (
+                        <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #333', fontSize: '0.75em', color: '#888', wordBreak: 'break-word', maxWidth: '250px' }}>
+                            <span style={{ color: '#aaa' }}>Path: </span>{hoveredItem.originalPath}
+                        </div>
+                    )}
                 </div>
             )}
 

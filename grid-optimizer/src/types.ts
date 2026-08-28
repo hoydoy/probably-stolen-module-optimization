@@ -16,6 +16,7 @@ export interface InventoryItem {
     effectValues: [number, number];
     isInfinite?: boolean;
     isLocked?: boolean;
+    originalPath?: string;
 }
 
 export interface ModuleTemplate {
