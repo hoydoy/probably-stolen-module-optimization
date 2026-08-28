@@ -4,6 +4,7 @@ import { COLOR_MAP, EFFECTS_LIST, MODULE_TEMPLATES, NODE_TEMPLATE } from './cons
 import { formatStatValue, getStatColor, getBaseStats, PRECOMPUTED_OFFSETS } from './utils';
 import { useOptimizer, runOptimizationEngine } from './hooks/useOptimizer';
 import MiniShape from './components/MiniShape';
+import SaveFileImporter from './components/SaveFileImporter';
 
 // offload mouse tracking to useRef; performance
 const DragGhost = ({ dragState, cellSize }: { dragState: any, cellSize: number }) => {
@@ -175,7 +176,17 @@ const MachineInstance = React.memo(forwardRef(({
     // Machine state loading handles fallback defaults from localStorage automatically
     const optimizer = useOptimizer(inventory, setInventory, machineId, getUsedItems, 3, isAnySolving);
     const [localHover, setLocalHover] = useState<{x: number, y: number} | null>(null);
-    const [machineType, setMachineType] = useState('Select Machine...');
+
+    // Automatically load the machine name from save file
+    const [machineType, setMachineType] = useState(() => {
+        return localStorage.getItem(`optimizer_machine_type_${machineId}`) || 'Select Machine...';
+    });
+
+    useEffect(() => {
+        if (machineType !== 'Select Machine...') {
+            localStorage.setItem(`optimizer_machine_type_${machineId}`, machineType);
+        }
+    }, [machineType, machineId]);
 
     useImperativeHandle(ref, () => ({
         run: optimizer.runOptimization,
@@ -1052,6 +1063,79 @@ export default function ModuleInventoryUI() {
         ));
     };
 
+    const handleImportSave = useCallback((newItems: InventoryItem[], newMachines: { id: string, boardIds: (string | null)[][], machineType: string, tier: GridTier }[]) => {
+        setInventory(prev => [...prev, ...newItems]);
+
+        newMachines.forEach(m => {
+            localStorage.setItem(`optimizer_machine_${m.id}`, JSON.stringify({ boardIds: m.boardIds, tier: m.tier }));
+            localStorage.setItem(`optimizer_machine_type_${m.id}`, m.machineType);
+        });
+
+        if (newMachines.length > 0) {
+            setMachines(prev => {
+                const emptyMachineIds = new Set<string>();
+
+                prev.forEach(m => {
+                    const machine = machinesRef.current[m.id];
+                    let isEmpty = true;
+
+                    if (machine) {
+                        const board = machine.getBoard();
+                        if (board) {
+                            for (let y = 0; y < 5; y++) {
+                                for (let x = 0; x < 7; x++) {
+                                    const cell = board[y][x];
+                                    if (cell && cell !== 'Locked') {
+                                        isEmpty = false;
+                                        break;
+                                    }
+                                }
+                                if (!isEmpty) break;
+                            }
+                        }
+                    } else {
+                        const saved = localStorage.getItem(`optimizer_machine_${m.id}`);
+                        if (saved) {
+                            try {
+                                const parsed = JSON.parse(saved);
+                                if (parsed.boardIds) {
+                                    for (let y = 0; y < 5; y++) {
+                                        for (let x = 0; x < 7; x++) {
+                                            const cell = parsed.boardIds[y]?.[x];
+                                            if (cell && cell !== 'Locked') {
+                                                isEmpty = false;
+                                                break;
+                                            }
+                                        }
+                                        if (!isEmpty) break;
+                                    }
+                                }
+                            } catch (e) {}
+                        }
+                    }
+
+                    if (isEmpty) {
+                        emptyMachineIds.add(m.id);
+                        localStorage.removeItem(`optimizer_machine_${m.id}`);
+                        localStorage.removeItem(`optimizer_machine_type_${m.id}`);
+                        delete machinesRef.current[m.id];
+                    }
+                });
+
+                setTimeout(() => {
+                    setSolvingStates(s => {
+                        const ns = { ...s };
+                        emptyMachineIds.forEach(id => delete ns[id]);
+                        return ns;
+                    });
+                }, 0);
+
+                const keptMachines = prev.filter(m => !emptyMachineIds.has(m.id));
+                return [...keptMachines, ...newMachines.map(m => ({ id: m.id }))];
+            });
+        }
+    }, []);
+
     const shouldPushNodeToEnd = filterGroup !== 'All';
     const catalogDisplayList = shouldPushNodeToEnd
         ? [...filteredModules, NODE_TEMPLATE]
@@ -1126,6 +1210,8 @@ export default function ModuleInventoryUI() {
     }, []);
 
     const cellSize = machines.length <= 2 ? 50 : (machines.length <= 4 ? 40 : 35);
+
+    const [copiedPath, setCopiedPath] = useState(false);
 
     return (
         <div className="main-container">
@@ -1373,6 +1459,31 @@ export default function ModuleInventoryUI() {
                 >
                     + Add Machine
                 </button>
+                <SaveFileImporter onImport={handleImportSave} />
+            </div>
+
+            <div
+                title="Click to copy path"
+                onClick={() => {
+                    navigator.clipboard.writeText('%USERPROFILE%\\AppData\\LocalLow\\Questing Goose Studio\\Probably Stolen');
+                    setCopiedPath(true);
+                    setTimeout(() => setCopiedPath(false), 2000);
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = '#eee'} // hover
+                onMouseLeave={(e) => e.currentTarget.style.color = '#888'} // default
+                style={{
+                    marginTop: '8px',
+                    color: '#888',
+                    fontSize: '0.85em',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    transition: 'color 0.15s ease-in-out'
+                }}
+            >
+                {copiedPath
+                    ? "Path copied to clipboard!"
+                    : "Default save_#.es3 file path: %USERPROFILE%\\AppData\\LocalLow\\Questing Goose Studio\\Probably Stolen"
+                }
             </div>
 
             {/* Catalog & Inventory */}

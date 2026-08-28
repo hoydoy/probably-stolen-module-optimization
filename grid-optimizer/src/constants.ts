@@ -48,10 +48,10 @@ export const MODULE_TEMPLATES: ModuleTemplate[] = [];
 });
 
 // Specials
-MODULE_TEMPLATES.push({ shape: 'Square4_High', color: 'Purple', size: 4, tier: 'Special', shapeType: 'Square', displayName: 'Neural Core (Uncapped)', group: 'Special' });
-MODULE_TEMPLATES.push({ shape: 'Square4_Base', color: 'Purple', size: 4, tier: 'Special', shapeType: 'Square', displayName: 'Neural Core (Capped)', group: 'Special' });
-MODULE_TEMPLATES.push({ shape: 'Line4', color: 'DarkRed', size: 4, tier: 'Special', shapeType: 'Line', displayName: 'Alarm Module', group: 'Special' });
-MODULE_TEMPLATES.push({ shape: 'Line4', color: 'Grey', size: 4, tier: 'Special', shapeType: 'Line', displayName: 'Junk Processing', group: 'Special' });
-MODULE_TEMPLATES.push({ shape: 'Line4', color: 'Grey', size: 4, tier: 'Special', shapeType: 'Line', displayName: 'Blast Module', group: 'Special' });
+MODULE_TEMPLATES.push({ shape: 'Square4_High', color: 'Purple', size: 4, tier: 'Special', shapeType: 'Square', displayName: 'Neural Core Module (Uncapped)', group: 'Special' });
+MODULE_TEMPLATES.push({ shape: 'Square4_Base', color: 'Purple', size: 4, tier: 'Special', shapeType: 'Square', displayName: 'Neural Core Module (Capped)', group: 'Special' });
+MODULE_TEMPLATES.push({ shape: 'Line4', color: 'DarkRed', size: 4, tier: 'Special', shapeType: 'Line', displayName: 'Alarm Transmitter Module', group: 'Special' });
+MODULE_TEMPLATES.push({ shape: 'Line4', color: 'Grey', size: 4, tier: 'Special', shapeType: 'Line', displayName: 'Furnace Module (Junk Processing)', group: 'Special' });
+MODULE_TEMPLATES.push({ shape: 'Line4', color: 'Grey', size: 4, tier: 'Special', shapeType: 'Line', displayName: 'Furnace Module (Blast)', group: 'Special' });
 
-export const NODE_TEMPLATE: ModuleTemplate = { shape: 'Node1x2', color: 'White', size: 2, tier: 'Base', shapeType: 'Node', displayName: 'Node', group: 'All' };
+export const NODE_TEMPLATE: ModuleTemplate = { shape: 'Node1x2', color: 'White', size: 2, tier: 'Base', shapeType: 'Node', displayName: 'Node (Medium)', group: 'All' };

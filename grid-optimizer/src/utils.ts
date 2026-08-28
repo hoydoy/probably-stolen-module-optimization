@@ -1,17 +1,21 @@
 import type {ModuleShape, ModuleColor, Stats, Point, InventoryItem} from './types';
 import { SHAPE_DEFINITIONS } from './constants';
 
+const STAT_EPSILON = 1e-9;
+export const roundStat = (val: number) => val < 0 ? Math.ceil(val - STAT_EPSILON) : Math.floor(val + STAT_EPSILON);
+
 export const getBaseStats = (template: { shape: ModuleShape, color: ModuleColor, displayName: string }): Stats => {
     const stats = { Performance: 0, Quality: 0, Efficiency: 0 };
+
     if (template.shape === 'Node1x2') return stats;
 
     const { shape, color, displayName } = template;
 
-    if (displayName.includes('Neural Core (Uncapped)')) return { Performance: 200, Quality: 100, Efficiency: -200 };
-    if (displayName.includes('Neural Core (Capped)')) return { Performance: 100, Quality: 50, Efficiency: -100 };
-    if (displayName.includes('Alarm Module')) return { Performance: 0, Quality: 0, Efficiency: -50 };
-    if (displayName.includes('Junk Processing')) return { Performance: 0, Quality: 0, Efficiency: 0 };
-    if (displayName.includes('Blast Module')) return { Performance: 0, Quality: 0, Efficiency: -100 };
+    if (displayName.includes('Neural Core Module (Uncapped)')) return { Performance: 200, Quality: 100, Efficiency: -200 };
+    if (displayName.includes('Neural Core Module (Capped)')) return { Performance: 100, Quality: 50, Efficiency: -100 };
+    if (displayName.includes('Alarm Transmitter Module')) return { Performance: 0, Quality: 0, Efficiency: -50 };
+    if (displayName.includes('(Junk Processing)')) return { Performance: 0, Quality: 0, Efficiency: 0 };
+    if (displayName.includes('(Blast)')) return { Performance: 0, Quality: 0, Efficiency: -100 };
 
     const isL3 = shape === 'L3';
     const isBase4 = shape.includes('_Base');
@@ -34,6 +38,7 @@ export const getBaseStats = (template: { shape: ModuleShape, color: ModuleColor,
         if (isHigh4) { stats.Performance = -16; stats.Efficiency = 32; }
         if (isSize5) { stats.Performance = -20; stats.Efficiency = 40; }
     }
+
     return stats;
 };
 
@@ -56,19 +61,18 @@ const computeItemStats = (item: InventoryItem): { effectiveBase: Stats, internal
             if (customVal !== undefined && !isNaN(customVal)) {
                 const truncVal = Math.trunc(customVal);
                 if (p > 0) { p = truncVal; claimed.Performance = true; }
-                else if (p < 0) { p *= 2; }
-
+                else if (p < 0) { p = roundStat(p * 2); }
                 if (q > 0) { q = truncVal; claimed.Quality = true; }
-                else if (q < 0) { q *= 2; }
-
+                else if (q < 0) { q = roundStat(q * 2); }
                 if (e > 0) { e = truncVal; claimed.Efficiency = true; }
-                else if (e < 0) { e *= 2; }
+                else if (e < 0) { e = roundStat(e * 2); }
             }
             effectiveBase = { Performance: p, Quality: q, Efficiency: e };
         }
         else if (effect === 'Learning Algorithm') {
             if (customVal !== undefined && !isNaN(customVal)) {
                 const truncVal = Math.trunc(customVal);
+
                 if (p > 0) { p = truncVal; claimed.Performance = true; }
                 else if (p < 0) { p = Math.min(0, p + truncVal); claimed.Performance = true; }
 
@@ -81,24 +85,24 @@ const computeItemStats = (item: InventoryItem): { effectiveBase: Stats, internal
             effectiveBase = { Performance: p, Quality: q, Efficiency: e };
         }
         else if (effect === 'Premium') {
-            if (!claimed.Performance) p *= 1.2;
-            if (!claimed.Quality) q *= 1.2;
-            if (!claimed.Efficiency) e *= 1.2;
+            if (!claimed.Performance) p = roundStat(p * 1.2);
+            if (!claimed.Quality) q = roundStat(q * 1.2);
+            if (!claimed.Efficiency) e = roundStat(e * 1.2);
         }
         else if (effect === 'Inferior') {
-            if (!claimed.Performance) p *= 0.8;
-            if (!claimed.Quality) q *= 0.8;
-            if (!claimed.Efficiency) e *= 0.8;
+            if (!claimed.Performance) p = roundStat(p * 0.8);
+            if (!claimed.Quality) q = roundStat(q * 0.8);
+            if (!claimed.Efficiency) e = roundStat(e * 0.8);
         }
         else if (effect === 'Overcharged') {
-            if (!claimed.Performance) p *= 2.0;
-            if (!claimed.Quality) q *= 2.0;
-            if (!claimed.Efficiency) e *= 2.0;
+            if (!claimed.Performance) p = roundStat(p * 2.0);
+            if (!claimed.Quality) q = roundStat(q * 2.0);
+            if (!claimed.Efficiency) e = roundStat(e * 2.0);
         }
         else if (effect === 'Negative Feedback') {
-            if (!claimed.Performance) p *= 1.25;
-            if (!claimed.Quality) q *= 1.25;
-            if (!claimed.Efficiency) e *= 1.25;
+            if (!claimed.Performance) p = roundStat(p * 1.25);
+            if (!claimed.Quality) q = roundStat(q * 1.25);
+            if (!claimed.Efficiency) e = roundStat(e * 1.25);
         }
     });
 
@@ -108,10 +112,6 @@ const computeItemStats = (item: InventoryItem): { effectiveBase: Stats, internal
 export const getEffectiveBaseStats = (item: InventoryItem): Stats => computeItemStats(item).effectiveBase;
 
 export const applyInternalEffects = (item: InventoryItem): Stats => computeItemStats(item).internal;
-
-// fix for floating-point multiplication
-const STAT_EPSILON = 1e-9;
-export const roundStat = (val: number) => val < 0 ? Math.ceil(val - STAT_EPSILON) : Math.floor(val + STAT_EPSILON);
 
 export const formatStatValue = (val: number) => {
     const rounded = Math.trunc(val);
@@ -136,6 +136,7 @@ const matrixToOffsets = (matrix: number[][]): Point[] => {
     const minY = Math.min(...points.map(p => p.y));
     const topRow = points.filter(p => p.y === minY);
     const minX = Math.min(...topRow.map(p => p.x));
+
     return points.map(p => ({ x: p.x - minX, y: p.y - minY })).sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y));
 };
 
@@ -183,6 +184,7 @@ PRECOMPUTED_OFFSETS.forEach((orientations, shape) => {
         const xs = new Int8Array(count);
         const ys = new Int8Array(count);
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
         for (let i = 0; i < count; i++) {
             const { x, y } = offsets[i];
             xs[i] = x; ys[i] = y;

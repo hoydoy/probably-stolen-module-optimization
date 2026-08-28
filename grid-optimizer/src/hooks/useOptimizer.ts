@@ -399,16 +399,26 @@ export const calculateBoardStats = (
 
         let { Performance: p, Quality: q, Efficiency: e } = internalStats.get(item.id)!;
 
-        let multiplier = 0;
-        if (minX === 0 && item.effects.includes('Side Mount')) multiplier += 0.20;
-        if (minY === 0 && item.effects.includes('Top Mount')) multiplier += 0.20;
-        if (item.effects.includes('Receiver')) multiplier += (0.10 * adjNodes);
-
-        if (multiplier > 0) {
-            p = roundStat(p * (1 + multiplier));
-            q = roundStat(q * (1 + multiplier));
-            e = roundStat(e * (1 + multiplier));
+        let pBonus = 0, qBonus = 0, eBonus = 0;
+        if (minX === 0 && item.effects.includes('Side Mount')) {
+            pBonus += roundStat(p * 0.20);
+            qBonus += roundStat(q * 0.20);
+            eBonus += roundStat(e * 0.20);
         }
+        if (minY === 0 && item.effects.includes('Top Mount')) {
+            pBonus += roundStat(p * 0.20);
+            qBonus += roundStat(q * 0.20);
+            eBonus += roundStat(e * 0.20);
+        }
+        if (item.effects.includes('Receiver')) {
+            pBonus += roundStat(p * 0.10 * adjNodes);
+            qBonus += roundStat(q * 0.10 * adjNodes);
+            eBonus += roundStat(e * 0.10 * adjNodes);
+        }
+
+        p += pBonus;
+        q += qBonus;
+        e += eBonus;
 
         const absorb = absorptionStats.get(item.id)!;
         p += absorb.Performance;
@@ -584,16 +594,26 @@ export const evaluatePlacementDelta = (
     let q = internal.Quality;
     let e = internal.Efficiency;
 
-    let multiplier = 0;
-    if (ctx.hasSideMount && x + orientation.minX === 0) multiplier += 0.20;
-    if (ctx.hasTopMount && y + orientation.minY === 0) multiplier += 0.20;
-    if (ctx.hasReceiver) multiplier += (0.10 * adjNodes);
-
-    if (multiplier > 0) {
-        p = roundStat(p * (1 + multiplier));
-        q = roundStat(q * (1 + multiplier));
-        e = roundStat(e * (1 + multiplier));
+    let pBonus = 0, qBonus = 0, eBonus = 0;
+    if (ctx.hasSideMount && x + orientation.minX === 0) {
+        pBonus += roundStat(internal.Performance * 0.20);
+        qBonus += roundStat(internal.Quality * 0.20);
+        eBonus += roundStat(internal.Efficiency * 0.20);
     }
+    if (ctx.hasTopMount && y + orientation.minY === 0) {
+        pBonus += roundStat(internal.Performance * 0.20);
+        qBonus += roundStat(internal.Quality * 0.20);
+        eBonus += roundStat(internal.Efficiency * 0.20);
+    }
+    if (ctx.hasReceiver) {
+        pBonus += roundStat(internal.Performance * 0.10 * adjNodes);
+        qBonus += roundStat(internal.Quality * 0.10 * adjNodes);
+        eBonus += roundStat(internal.Efficiency * 0.10 * adjNodes);
+    }
+
+    p += pBonus;
+    q += qBonus;
+    e += eBonus;
 
     if (nfCount > 0) {
         p += nfCount * 0.25 * nfPerf;
@@ -1498,7 +1518,21 @@ export function useOptimizer(
 
     const savedState = getSavedState();
 
-    const [tier, setTier] = useState<GridTier>(savedState?.tier ?? defaultTier);
+    const [tier, setTier] = useState<GridTier>(() => {
+        const saved = localStorage.getItem(`optimizer_machine_${machineId}`);
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                if (parsed.tier && [1, 2, 3].includes(parsed.tier)) {
+                    return parsed.tier as GridTier;
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        return defaultTier;
+    });
+
     const [targetStats, setTargetStats] = useState<TargetStats>(savedState?.targetStats ?? { Performance: null, Quality: null, Efficiency: null });
     const [maximizeStats, setMaximizeStats] = useState(savedState?.maximizeStats ?? { Performance: false, Quality: false, Efficiency: false });
     const [ignoreStats, setIgnoreStats] = useState(savedState?.ignoreStats ?? { Performance: false, Quality: false, Efficiency: false });
@@ -1510,6 +1544,16 @@ export function useOptimizer(
         boardRef.current = newBoard;
         setBoard(newBoard);
     };
+
+    const [isInitializedFromSave, setIsInitializedFromSave] = useState(false);
+
+    useEffect(() => {
+        if (!isInitializedFromSave && inventory.length > 0 && savedState?.boardIds) {
+            const initialized = initializeBoard(tier, savedState.boardIds, inventory);
+            setBoardSync(initialized);
+            setIsInitializedFromSave(true);
+        }
+    }, [inventory, tier, savedState, isInitializedFromSave]);
 
     const [bestTotals, setBestTotals] = useState<Stats>({ Performance: 0, Quality: 0, Efficiency: 0 });
     const [bestPieceStats, setBestPieceStats] = useState<Map<string, Stats>>(new Map());
@@ -1737,13 +1781,13 @@ export function useOptimizer(
                 // It is an inventory past the 8-bit module count the format allows
                 if (newCode) {
                     if (totals.Performance !== 0 || totals.Quality !== 0 || totals.Efficiency !== 0) {
-                        const timer = setTimeout(() => saveToDatabase(tier, totals, newCode, availableForCode), 30000);
+                        const timer = setTimeout(() => saveToDatabase(tier, totals, newCode, availableForCode), 3000000); // save timer
                         return () => clearTimeout(timer);
                     }
                 }
             } else {
-                    setSolutionCode('');
-                }
+                setSolutionCode('');
+            }
         }
     }, [inventory, tier, maximizeStats, targetStats, ignoreStats, statPriority, machineId, getUsedItems, board, isSolving, isExternallySolving]);
 
