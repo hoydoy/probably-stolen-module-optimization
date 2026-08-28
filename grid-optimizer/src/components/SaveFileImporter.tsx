@@ -112,7 +112,7 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                 const newMachines: { id: string, boardIds: (string | null)[][], machineType: string, tier: GridTier }[] = [];
                 const machineContents = new Map<number, { invId: string, modifiedShape: any, parentName: string, parentItem: any }[]>();
 
-                const machineKeywords = ['machine', 'purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer'];
+                const machineKeywords = ['machine', 'purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm'];
 
                 saveItems.forEach((item: any) => {
                     const name = item.name || '';
