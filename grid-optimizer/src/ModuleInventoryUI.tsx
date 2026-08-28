@@ -1184,6 +1184,16 @@ export default function ModuleInventoryUI() {
         setMachines(prev => [...prev, { id: `m_${Math.random().toString(36).substring(2,8)}` }]);
     };
 
+    const handleClearAllMachines = () => {
+        machines.forEach(m => {
+            localStorage.removeItem(`optimizer_machine_${m.id}`);
+            localStorage.removeItem(`optimizer_machine_type_${m.id}`);
+        });
+        setMachines([{ id: `m_${Math.random().toString(36).substring(2,8)}` }]);
+        machinesRef.current = {};
+        setSolvingStates({});
+    };
+
     const handleDuplicateMachine = useCallback((machineId: string) => {
         const machine = machinesRef.current[machineId];
         if (machine) {
@@ -1401,8 +1411,20 @@ export default function ModuleInventoryUI() {
             )}
 
             {/* Main Grid & Controls */}
-            <div style={{ marginBottom: '15px', color: '#888', fontSize: '0.85em', textAlign: 'center' }}>
-                Tip: While dragging a module, press Q, E, or F to rotate or flip.
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <div style={{ width: '120px' }}></div>
+                <div style={{ color: '#888', fontSize: '0.85em', textAlign: 'center', flex: 1 }}>
+                    Tip: While dragging a module, press Q, E, or F to rotate or flip.
+                </div>
+                <div style={{ width: '120px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        onClick={handleClearAllMachines}
+                        disabled={isAnySolving}
+                        style={{ padding: '6px 12px', backgroundColor: 'rgba(255, 77, 77, 0.1)', color: '#ff4d4d', border: '1px solid #ff4d4d', borderRadius: '6px', cursor: isAnySolving ? 'not-allowed' : 'pointer', fontSize: '0.8em' }}
+                    >
+                        Delete All
+                    </button>
+                </div>
             </div>
 
             <div className="machines-container">
