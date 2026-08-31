@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle, us
 import type { Stats, GridTier, InventoryItem, FilterGroup, ItemEffect, ModuleTemplate, ModuleColor, Point } from './types';
 import { COLOR_MAP, EFFECTS_LIST, MODULE_TEMPLATES, NODE_TEMPLATE } from './constants';
 import { formatStatValue, getStatColor, getBaseStats, PRECOMPUTED_OFFSETS } from './utils';
-import { useOptimizer, runOptimizationEngine } from './hooks/useOptimizer';
+import { useOptimizer } from './hooks/useOptimizer';
 import MiniShape from './components/MiniShape';
 import SaveFileImporter from './components/SaveFileImporter';
 
@@ -73,7 +73,8 @@ const InventoryItemRow = React.memo(({ item, isAnySolving, updateItemEffect, upd
                                         <select
                                             value={currentEffect}
                                             onChange={(e) => updateItemEffect(item, effectIdx as 0 | 1, e.target.value as ItemEffect)}
-                                            style={{ flex: 1, padding: '2px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', minWidth: '0' }}
+                                            disabled={isAnySolving}
+                                            style={{ flex: 1, padding: '2px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', minWidth: '0', cursor: isAnySolving ? 'not-allowed' : 'pointer', opacity: isAnySolving ? 0.6 : 1 }}
                                         >
                                             {EFFECTS_LIST.filter(eff => eff === 'None' || eff !== item.effects[effectIdx === 0 ? 1 : 0]).map(eff => (
                                                 <option key={eff} value={eff}>{eff === 'None' ? 'No Effect' : eff}</option>
@@ -87,7 +88,8 @@ const InventoryItemRow = React.memo(({ item, isAnySolving, updateItemEffect, upd
                                                     value={item.effectValues[effectIdx]}
                                                     onChange={(e) => updateItemEffectValue(item.id, effectIdx as 0 | 1, Number(e.target.value))}
                                                     onBlur={(e) => handleBlurEffectValue(item, effectIdx as 0 | 1, Number(e.target.value))}
-                                                    style={{ width: '48px', padding: '1px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', textAlign: 'center' }}
+                                                    disabled={isAnySolving}
+                                                    style={{ width: '48px', padding: '1px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', textAlign: 'center', cursor: isAnySolving ? 'not-allowed' : 'auto', opacity: isAnySolving ? 0.6 : 1 }}
                                                 />
                                                 <span style={{ fontSize: '0.65em', color: '#aaa' }}>%</span>
                                             </div>
@@ -171,12 +173,14 @@ const MachineInstance = React.memo(forwardRef(({
                                                    onSolvingChange,
                                                    onDragTargetRefChange,
                                                    isAnySolving,
+                                                   isThisMachineSolving,
                                                    canDelete
                                                }: any, ref) => {
     // Machine state loading handles fallback defaults from localStorage automatically
     const optimizer = useOptimizer(inventory, setInventory, machineId, getUsedItems, 3, isAnySolving);
     const [localHover, setLocalHover] = useState<{x: number, y: number} | null>(null);
     const [showPaths, setShowPaths] = useState(false);
+    const currentSolving = optimizer.isSolving || isThisMachineSolving;
 
     // Automatically load the machine name from save file
     const [machineType, setMachineType] = useState(() => {
@@ -331,10 +335,10 @@ const MachineInstance = React.memo(forwardRef(({
                 {canDelete && (
                     <button
                         onClick={() => onDelete(machineId)}
-                        disabled={optimizer.isSolving || isAnySolving}
+                        disabled={isAnySolving}
                         style={{
-                            background: 'none', border: 'none', color: (optimizer.isSolving || isAnySolving) ? '#444' : '#666',
-                            cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer', fontSize: '1.2em', padding: '4px 4px'
+                            background: 'none', border: 'none', color: isAnySolving ? '#444' : '#666',
+                            cursor: isAnySolving ? 'not-allowed' : 'pointer', fontSize: '1.2em', padding: '4px 4px'
                         }}
                         title="Delete Machine"
                     >
@@ -403,7 +407,7 @@ const MachineInstance = React.memo(forwardRef(({
                                     }}
                                     onMouseLeave={() => setHoverInfo(null)}
                                     onMouseDown={(e) => {
-                                        if (optimizer.isSolving || isAnySolving || !cell || cell === 'Locked') return;
+                                        if (isAnySolving || !cell || cell === 'Locked') return;
                                         e.preventDefault();
                                         const footprint = getBoardFootprint(cell.id);
                                         if (!footprint) return;
@@ -458,7 +462,7 @@ const MachineInstance = React.memo(forwardRef(({
                                         height: `${cellSize}px`,
                                         ...getCellStyles(x, y, cell),
                                         opacity: isBeingDragged ? 0.3 : 1,
-                                        cursor: cell && cell !== 'Locked' ? ((optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'grab') : 'default',
+                                        cursor: cell && cell !== 'Locked' ? (isAnySolving ? 'not-allowed' : 'grab') : 'default',
                                         boxSizing: 'border-box',
                                         position: 'relative'
                                     }}
@@ -510,11 +514,11 @@ const MachineInstance = React.memo(forwardRef(({
                             });
                             setMachineType(`${selected} ${max + 1}`);
                         }}
-                        disabled={optimizer.isSolving || isAnySolving}
+                        disabled={currentSolving}
                         style={{
                             width: '100%', padding: '6px 8px', backgroundColor: '#222', color: '#eee',
                             border: '1px solid #333', borderRadius: '6px', fontSize: '0.85em',
-                            outline: 'none', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer',
+                            outline: 'none', cursor: currentSolving ? 'not-allowed' : 'pointer',
                             textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden'
                         }}
                     >
@@ -536,7 +540,7 @@ const MachineInstance = React.memo(forwardRef(({
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                         <div style={{ display: 'flex', gap: '5px', backgroundColor: '#222', padding: '5px', borderRadius: '6px' }}>
                             {[1, 2, 3].map((t) => (
-                                <button key={t} onClick={() => optimizer.handleTierChange(t as GridTier)} disabled={optimizer.isSolving || isAnySolving} style={{ padding: '6px 12px', fontSize: '0.85em', backgroundColor: optimizer.tier === t ? '#555' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}>
+                                <button key={t} onClick={() => optimizer.handleTierChange(t as GridTier)} disabled={currentSolving} style={{ padding: '6px 12px', fontSize: '0.85em', backgroundColor: optimizer.tier === t ? '#555' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: currentSolving ? 'not-allowed' : 'pointer' }}>
                                     Tier {t}
                                 </button>
                             ))}
@@ -553,8 +557,8 @@ const MachineInstance = React.memo(forwardRef(({
                                             type="checkbox"
                                             checked={optimizer.maximizeStats[stat]}
                                             onChange={() => optimizer.setMaximizeStats((prev: any) => ({ ...prev, [stat]: !prev[stat] }))}
-                                            disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
-                                            style={{ margin: 0, cursor: (optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
+                                            disabled={currentSolving || optimizer.ignoreStats[stat]}
+                                            style={{ margin: 0, cursor: (currentSolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
                                         /> Max
                                     </label>
                                     <label
@@ -572,8 +576,8 @@ const MachineInstance = React.memo(forwardRef(({
                                                 }
                                                 return next;
                                             })}
-                                            disabled={optimizer.isSolving || isAnySolving}
-                                            style={{ margin: 0, cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                                            disabled={currentSolving}
+                                            style={{ margin: 0, cursor: currentSolving ? 'not-allowed' : 'pointer' }}
                                         /> Ign
                                     </label>
                                 </div>
@@ -583,7 +587,7 @@ const MachineInstance = React.memo(forwardRef(({
                                         type="number"
                                         value={optimizer.targetStats[stat] ?? ''}
                                         onChange={(e) => optimizer.setTargetStats((prev: any) => ({ ...prev, [stat]: e.target.value === '' ? null : Number(e.target.value) }))}
-                                        disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
+                                        disabled={currentSolving || optimizer.ignoreStats[stat]}
                                         style={{ width: '35px', padding: '2px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', textAlign: 'center' }}
                                     />
                                     <span style={{ fontSize: '0.65em', color: '#888' }}>%</span>
@@ -594,8 +598,8 @@ const MachineInstance = React.memo(forwardRef(({
                                         title={`Priority for ${stat} — 1 matters most.`}
                                         value={optimizer.statPriority[stat]}
                                         onChange={(e) => optimizer.setStatPriority((prev: StatRanks) => ({ ...prev, [stat]: Number(e.target.value) }))}
-                                        disabled={optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]}
-                                        style={{ padding: '1px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', cursor: (optimizer.isSolving || isAnySolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
+                                        disabled={currentSolving || optimizer.ignoreStats[stat]}
+                                        style={{ padding: '1px', fontSize: '0.7em', backgroundColor: '#111', color: '#eee', border: '1px solid #444', borderRadius: '3px', cursor: (currentSolving || optimizer.ignoreStats[stat]) ? 'not-allowed' : 'pointer' }}
                                     >
                                         <option value={1}>1</option>
                                         <option value={2}>2</option>
@@ -608,29 +612,36 @@ const MachineInstance = React.memo(forwardRef(({
 
                     <div style={{ display: 'flex', gap: '5px', width: '100%' }}>
                         <button
-                            onClick={optimizer.isSolving ? optimizer.stopOptimization : optimizer.runOptimization}
-                            disabled={(inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)}
+                            onClick={() => {
+                                if (currentSolving) {
+                                    optimizer.stopOptimization();
+                                    onSolvingChange(machineId, false);
+                                } else {
+                                    optimizer.runOptimization();
+                                }
+                            }}
+                            disabled={inventory.length === 0 && !currentSolving}
                             style={{
                                 flex: 2, padding: '8px', fontSize: '0.85em',
-                                backgroundColor: optimizer.isSolving ? '#ff4d4d' : '#4caf50',
+                                backgroundColor: currentSolving ? '#ff4d4d' : '#4caf50',
                                 color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold',
-                                cursor: ((inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)) ? 'not-allowed' : 'pointer',
-                                opacity: ((inventory.length === 0 && !optimizer.isSolving) || (!optimizer.isSolving && isAnySolving)) ? 0.5 : 1
+                                cursor: (inventory.length === 0 && !currentSolving) ? 'not-allowed' : 'pointer',
+                                opacity: (inventory.length === 0 && !currentSolving) ? 0.5 : 1
                             }}
                         >
-                            {optimizer.isSolving ? 'Stop Optimizer' : 'Run Optimizer'}
+                            {currentSolving ? 'Stop Optimizer' : 'Run Optimizer'}
                         </button>
                         <button
                             onClick={optimizer.resetBoard}
-                            disabled={optimizer.isSolving || isAnySolving}
-                            style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                            disabled={isAnySolving}
+                            style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: isAnySolving ? 'not-allowed' : 'pointer' }}
                         >
                             Clear
                         </button>
                         <button
                             onClick={() => onDuplicate(machineId)}
-                            disabled={optimizer.isSolving || isAnySolving}
-                            style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                            disabled={isAnySolving}
+                            style={{ flex: 1, padding: '8px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: isAnySolving ? 'not-allowed' : 'pointer' }}
                         >
                             Duplicate
                         </button>
@@ -644,15 +655,15 @@ const MachineInstance = React.memo(forwardRef(({
                                 value={optimizer.solutionCode}
                                 onChange={(e) => optimizer.setSolutionCode(e.target.value)}
                                 placeholder="Solution code..."
-                                disabled={optimizer.isSolving || isAnySolving}
+                                disabled={isAnySolving}
                                 style={{ flex: 1, minWidth: 0, padding: '6px', fontSize: '0.75em', backgroundColor: '#111', color: '#eee', border: '1px solid #555', borderRadius: '6px' }}
                             />
                         </div>
                         <div style={{ display: 'flex', gap: '5px', flex: '3' }}>
                             <button
                                 onClick={() => optimizer.importSolution(optimizer.solutionCode)}
-                                disabled={!optimizer.solutionCode || optimizer.isSolving || isAnySolving}
-                                style={{ flex: 1, padding: '6px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (!optimizer.solutionCode || optimizer.isSolving || isAnySolving) ? 'not-allowed' : 'pointer' }}
+                                disabled={!optimizer.solutionCode || isAnySolving}
+                                style={{ flex: 1, padding: '6px', fontSize: '0.85em', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '6px', cursor: (!optimizer.solutionCode || isAnySolving) ? 'not-allowed' : 'pointer' }}
                             >
                                 Import
                             </button>
@@ -815,7 +826,6 @@ export default function ModuleInventoryUI() {
     const dragRef = useRef(dragState);
 
     const isAnySolving = Object.values(solvingStates).some(s => s);
-    const globalIsSolvingRef = useRef(false);
 
     useEffect(() => { dragRef.current = dragState; }, [dragState]);
 
@@ -1227,37 +1237,10 @@ export default function ModuleInventoryUI() {
         : [NODE_TEMPLATE, ...filteredModules];
 
     const handleRunAll = () => {
-        if (isAnySolving || globalIsSolvingRef.current) {
-            globalIsSolvingRef.current = false;
+        if (isAnySolving) {
             Object.values(machinesRef.current).forEach((m: any) => m?.stop());
         } else {
-            globalIsSolvingRef.current = true;
-            const activeMachines = Object.entries(machinesRef.current).filter(([, m]) => m != null);
-
-            activeMachines.forEach(([id]: any) => handleSolvingChange(id, true));
-
-            const machinesConfig = activeMachines.map(([id, m]: any) => {
-                const state = m.getState();
-                return { id, tier: state.tier, targetStats: state.targetStats, maximizeStats: state.maximizeStats, ignoreStats: state.ignoreStats, statPriority: state.statPriority };
-            });
-
-            const initialBoards = activeMachines.map(([, m]: any) => m.getBoard());
-
-            runOptimizationEngine(
-                machinesConfig,
-                initialBoards,
-                expandedInventory,
-                expandedInventory,
-                globalIsSolvingRef,
-                (updates) => {
-                    updates.forEach((update, mId) => {
-                        machinesRef.current[mId]?.applyUpdate(update.board, update.totals, update.pieceStats, update.code);
-                    });
-                }
-            ).finally(() => {
-                globalIsSolvingRef.current = false;
-                activeMachines.forEach(([id]: any) => handleSolvingChange(id, false));
-            });
+            Object.values(machinesRef.current).forEach((m: any) => m?.run());
         }
     };
 
@@ -1536,6 +1519,7 @@ export default function ModuleInventoryUI() {
                         onSolvingChange={handleSolvingChange}
                         onDragTargetRefChange={setDragTargetRefChange}
                         isAnySolving={isAnySolving}
+                        isThisMachineSolving={solvingStates[m.id] || false}
                         canDelete={machines.length > 1}
                     />
                 ))}
