@@ -505,7 +505,9 @@ export const evaluatePlacementDelta = (
     testBoard: (InventoryItem | 'Locked' | null)[][],
     isBoardEmpty: boolean,
     precomputedInternal: Map<string, Stats>,
-    weightP: number, weightQ: number, weightE: number
+    dynWp: number, dynWq: number, dynWe: number,
+    currentP: number, currentQ: number, currentE: number,
+    config: MachineConfig
 ) => {
     if (x + orientation.minX < 0 || x + orientation.maxX > 6 ||
         y + orientation.minY < 0 || y + orientation.maxY > 4) {
@@ -561,7 +563,7 @@ export const evaluatePlacementDelta = (
 
     if (!isConnected && !isBoardEmpty) return -10000;
 
-    let nodeBonusScore = 0;
+    let pDelta = 0, qDelta = 0, eDelta = 0;
     let nfPerf = 0, nfQual = 0, nfEff = 0;
 
     for (let k = 0; k < neighborCount; k++) {
@@ -572,13 +574,13 @@ export const evaluatePlacementDelta = (
         const adjIsWhite = adjPiece.color === 'White';
         if (!isWhite && adjIsWhite) {
             adjNodes++;
-            nodeBonusScore += roundStat(internal.Performance * 0.20) * weightP;
-            nodeBonusScore += roundStat(internal.Quality * 0.20) * weightQ;
-            nodeBonusScore += roundStat(internal.Efficiency * 0.20) * weightE;
+            pDelta += roundStat(internal.Performance * 0.20);
+            qDelta += roundStat(internal.Quality * 0.20);
+            eDelta += roundStat(internal.Efficiency * 0.20);
         } else if (isWhite && !adjIsWhite) {
-            nodeBonusScore += roundStat(adjInternal.Performance * 0.20) * weightP;
-            nodeBonusScore += roundStat(adjInternal.Quality * 0.20) * weightQ;
-            nodeBonusScore += roundStat(adjInternal.Efficiency * 0.20) * weightE;
+            pDelta += roundStat(adjInternal.Performance * 0.20);
+            qDelta += roundStat(adjInternal.Quality * 0.20);
+            eDelta += roundStat(adjInternal.Efficiency * 0.20);
         }
 
         if (nfCount > 0 && !adjIsWhite) {
@@ -588,45 +590,81 @@ export const evaluatePlacementDelta = (
         }
     }
 
-    // Negative Feedback is folded into each stat separately and before the mount/receiver multiplier,
-    // so the heuristic ranks placements on the same terms the accepted score is computed with.
-    let p = internal.Performance;
-    let q = internal.Quality;
-    let e = internal.Efficiency;
+    let myP = internal.Performance;
+    let myQ = internal.Quality;
+    let myE = internal.Efficiency;
 
     let pBonus = 0, qBonus = 0, eBonus = 0;
     if (ctx.hasSideMount && x + orientation.minX === 0) {
-        pBonus += roundStat(internal.Performance * 0.20);
-        qBonus += roundStat(internal.Quality * 0.20);
-        eBonus += roundStat(internal.Efficiency * 0.20);
+        pBonus += roundStat(myP * 0.20);
+        qBonus += roundStat(myQ * 0.20);
+        eBonus += roundStat(myE * 0.20);
     }
     if (ctx.hasTopMount && y + orientation.minY === 0) {
-        pBonus += roundStat(internal.Performance * 0.20);
-        qBonus += roundStat(internal.Quality * 0.20);
-        eBonus += roundStat(internal.Efficiency * 0.20);
+        pBonus += roundStat(myP * 0.20);
+        qBonus += roundStat(myQ * 0.20);
+        eBonus += roundStat(myE * 0.20);
     }
     if (ctx.hasReceiver) {
-        pBonus += roundStat(internal.Performance * 0.10 * adjNodes);
-        qBonus += roundStat(internal.Quality * 0.10 * adjNodes);
-        eBonus += roundStat(internal.Efficiency * 0.10 * adjNodes);
+        pBonus += roundStat(myP * 0.10 * adjNodes);
+        qBonus += roundStat(myQ * 0.10 * adjNodes);
+        eBonus += roundStat(myE * 0.10 * adjNodes);
     }
 
-    p += pBonus;
-    q += qBonus;
-    e += eBonus;
+    myP += pBonus;
+    myQ += qBonus;
+    myE += eBonus;
 
     if (nfCount > 0) {
-        p += nfCount * 0.25 * nfPerf;
-        q += nfCount * 0.25 * nfQual;
-        e += nfCount * 0.25 * nfEff;
+        myP += nfCount * 0.25 * nfPerf;
+        myQ += nfCount * 0.25 * nfQual;
+        myE += nfCount * 0.25 * nfEff;
     }
 
-    p = roundStat(p);
-    q = roundStat(q);
-    e = roundStat(e);
+    pDelta += roundStat(myP);
+    qDelta += roundStat(myQ);
+    eDelta += roundStat(myE);
 
-    const statScore = (p * weightP) + (q * weightQ) + (e * weightE) + nodeBonusScore;
-    return statScore + (adjNodes * 0.05) - (negativeContactCount * 1000);
+    let statScore = 0;
+    const scoreStat = (key: keyof Stats, delta: number, current: number, dynW: number) => {
+        if (statIsIgnored(config, key)) return 0;
+        if (delta === 0) return 0;
+
+        const target = config.targetStats[key];
+        const maximize = config.maximizeStats[key];
+
+        if (target !== null && !maximize) {
+            const before = current;
+            const after = current + delta;
+
+            if (before >= target && after >= target) return 0;
+            if (before >= target && after < target) return delta * dynW * 100;
+            if (before < target) {
+                if (after <= target) return delta * dynW;
+                else return (target - before) * dynW;
+            }
+        } else if (target !== null && maximize) {
+            const before = current;
+            const after = current + delta;
+            if (before >= target) {
+                return delta * dynW;
+            } else {
+                if (after <= target) return delta * dynW * 10;
+                else return ((target - before) * dynW * 10) + ((after - target) * dynW);
+            }
+        } else if (maximize) {
+            return delta * dynW;
+        }
+        return 0;
+    };
+
+    statScore += scoreStat('Performance', pDelta, currentP, dynWp);
+    statScore += scoreStat('Quality', qDelta, currentQ, dynWq);
+    statScore += scoreStat('Efficiency', eDelta, currentE, dynWe);
+
+    const tiebreakers = (adjNodes * 0.05) - (negativeContactCount * 1000);
+    if (statScore <= 0) return -10000 + tiebreakers;
+    return statScore + tiebreakers;
 };
 
 export type MachineConfig = {
@@ -900,11 +938,11 @@ export const runOptimizationEngine = async (
     const tierOfRank = new Map<number, number>(rankOrder.map((r, i) => [r, i]));
     const tierOf = (m: MachineConfig, key: keyof Stats) => tierOfRank.get(priorityOf(m, key))!;
 
-    const currentTiers = new Float64Array(tierCount);
+    const currentTiers = new Float64Array(tierCount + 1);
     // epochTiers is the best this attempt has reached, bestTiers the best ever reached
     // They are the same thing until the search restarts; (see RESTART_AFTER_STAGNATIONS)
-    const epochTiers = new Float64Array(tierCount).fill(-Infinity);
-    const bestTiers = new Float64Array(tierCount).fill(-Infinity);
+    const epochTiers = new Float64Array(tierCount + 1).fill(-Infinity);
+    const bestTiers = new Float64Array(tierCount + 1).fill(-Infinity);
     const currentBoards = initialBoards.map(b => b.map(row => [...row]));
 
     // Only the machine picked for this iteration can change, so the stats and the solution code of every other machine stay valid:
@@ -930,12 +968,17 @@ export const runOptimizationEngine = async (
     // A stat marked ignored gets weight 0 so the placement heuristic stops steering away from it at all;
     // otherwise an unmaximised stat keeps the small 0.1 tiebreak weight
     const baseWeights = machines.map(m => {
-        let wp = m.ignoreStats?.Performance ? 0 : (m.maximizeStats.Performance ? 10 : 0.1);
-        let wq = m.ignoreStats?.Quality ? 0 : (m.maximizeStats.Quality ? 10 : 0.1);
-        let we = m.ignoreStats?.Efficiency ? 0 : (m.maximizeStats.Efficiency ? 10 : 0.1);
-        if (m.targetStats.Performance !== null) wp += 15;
-        if (m.targetStats.Quality !== null) wq += 15;
-        if (m.targetStats.Efficiency !== null) we += 15;
+        const getW = (key: keyof Stats) => {
+            if (statIsIgnored(m, key)) return 0;
+            let w = 0;
+            if (m.maximizeStats[key]) w += 10;
+            if (m.targetStats[key] !== null) w += 15;
+            return w;
+        };
+
+        let wp = getW('Performance');
+        let wq = getW('Quality');
+        let we = getW('Efficiency');
 
         const boost = (key: keyof Stats) =>
             statIsIgnored(m, key) ? 1 : Math.pow(PRIORITY_WEIGHT_STEP, tierCount - 1 - tierOf(m, key));
@@ -987,7 +1030,12 @@ export const runOptimizationEngine = async (
         for (let mask = 0; mask < (1 << targeted.length); mask++) {
             const w: Stats = { Performance: 0, Quality: 0, Efficiency: 0 };
             for (const key of STAT_KEYS) {
-                let v = statIsIgnored(m, key) ? 0 : (m.maximizeStats[key] ? 10 : 0.1);
+                if (statIsIgnored(m, key)) {
+                    w[key] = 0;
+                    continue;
+                }
+                let v = 0;
+                if (m.maximizeStats[key]) v += 10;
                 const ti = targeted.indexOf(key);
                 // Bit set means the target is already met, so the push for it is cut back, but never to nothing
                 // The draw decides which modules the fill is even offered,
@@ -1055,17 +1103,19 @@ export const runOptimizationEngine = async (
         piece: InventoryItem,
         fillBoard: (InventoryItem | 'Locked' | null)[][],
         fillBoardEmpty: boolean,
-        weightP: number, weightQ: number, weightE: number,
+        dynWp: number, dynWq: number, dynWe: number,
+        currentP: number, currentQ: number, currentE: number,
+        config: MachineConfig,
         incumbent: { x: number; y: number; orientation: Orientation } | null = null
     ) => {
         let bestX = -1, bestY = -1;
         let bestOrientation: Orientation | null = null;
-        let highestHeuristic = -Infinity;
+        let highestHeuristic = incumbent !== null ? -Infinity : 0.0001;
 
         if (incumbent !== null) {
             const incumbentScore = evaluatePlacementDelta(
                 ctx, incumbent.x, incumbent.y, incumbent.orientation, fillBoard, fillBoardEmpty,
-                precomputedInternal, weightP, weightQ, weightE
+                precomputedInternal, dynWp, dynWq, dynWe, currentP, currentQ, currentE, config
             );
             if (incumbentScore !== -Infinity) {
                 highestHeuristic = incumbentScore;
@@ -1088,7 +1138,7 @@ export const runOptimizationEngine = async (
 
                 const deltaScore = evaluatePlacementDelta(
                     ctx, x, y, orientation, fillBoard, fillBoardEmpty,
-                    precomputedInternal, weightP, weightQ, weightE
+                    precomputedInternal, dynWp, dynWq, dynWe, currentP, currentQ, currentE, config
                 );
                 if (deltaScore > highestHeuristic && deltaScore !== -Infinity) {
                     highestHeuristic = deltaScore;
@@ -1281,7 +1331,10 @@ export const runOptimizationEngine = async (
                         if (fillBoard[y][x] === null) freeCells.push(y * 7 + x);
                     }
                 }
+                shuffleInPlace(freeCells);
                 let fillBoardEmpty = freeCells.length === openCellCount[fillMIdx];
+
+                let currentTotals = calculateBoardStats(fillBoard, fullInventory, inventoryById).totals;
 
                 /* The board's specials, offered a better cell one at a time and before anything is drawn
                  *
@@ -1317,9 +1370,11 @@ export const runOptimizationEngine = async (
                     }
                     placeBestFit(
                         ctx, orientations, special.piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe,
+                        currentTotals.Performance, currentTotals.Quality, currentTotals.Efficiency, fillConfig,
                         home === null ? null : { x: homeX, y: homeY, orientation: home }
                     );
                     fillBoardEmpty = false;
+                    currentTotals = calculateBoardStats(fillBoard, fullInventory, inventoryById).totals;
                 }
 
                 infeasibleShapes.clear();
@@ -1367,9 +1422,10 @@ export const runOptimizationEngine = async (
                     const orientations = orientationsByIndex[pieceIdx];
                     if (!orientations) continue;
 
-                    if (placeBestFit(ctx, orientations, piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe)) {
+                    if (placeBestFit(ctx, orientations, piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe, currentTotals.Performance, currentTotals.Quality, currentTotals.Efficiency, fillConfig)) {
                         fillBoardEmpty = false;
                         consumedMark[pieceIdx] = consumedGen;
+                        currentTotals = calculateBoardStats(fillBoard, fullInventory, inventoryById).totals;
                     } else {
                         infeasibleShapes.add(piece.shape);
                     }
@@ -1404,7 +1460,7 @@ export const runOptimizationEngine = async (
             }
 
             // Density reward: a general tiebreak, so it sits in the least important tier and can never take a ranked stat out of its own tier
-            currentTiers[tierCount - 1] += totalPiecesPlaced * 5;
+            currentTiers[tierCount] -= totalPiecesPlaced * 5;
 
             if (machineCount > 1) {
                 for (const statKey of STAT_KEYS) {

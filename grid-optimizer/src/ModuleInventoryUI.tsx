@@ -521,7 +521,7 @@ const MachineInstance = React.memo(forwardRef(({
                         <option value="Select Machine..." disabled>Select Machine...</option>
                         {machineType !== "Select Machine..." && !["Moisture Farm", "Furnace", "Water Purifier", "Alarm System", "AgeWell", "Cryptographic Desequencer", "Mirage Projector"].includes(machineType) && (
                             <option value={machineType}>
-                                {machineType.length > 45 ? '...' + machineType.substring(machineType.length - 39) : machineType}
+                                {machineType.length > 45 ? '...' + machineType.substring(machineType.length - 42) : machineType}
                             </option>
                         )}
                         <option value="Moisture Farm">Moisture Farm</option>
