@@ -1,34 +1,42 @@
-import React, { useRef, useState } from 'react';
-import { PRECOMPUTED_OFFSETS, getBaseStats } from '../utils';
+import React, {useRef, useState} from 'react';
+import {PRECOMPUTED_OFFSETS, getBaseStats, isEvaporatorMachine, isFixedStatModule} from '../utils';
+import {getGridSize} from '../constants';
 import type {InventoryItem, ModuleShape, ItemEffect, ModuleColor, Point, GridTier} from '../types';
 
 interface SaveFileImporterProps {
-    onImport: (newItems: InventoryItem[], newMachines: { id: string, boardIds: (string | null)[][], machineType: string, tier: GridTier }[]) => void;
+    onImport: (newItems: InventoryItem[], newMachines: {
+        id: string,
+        boardIds: (string | null)[][],
+        machineType: string,
+        tier: GridTier
+    }[]) => void;
 }
 
-export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
+export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-    const getShapeFromData = (width: number, data: number[], isHighTier: boolean, blocks: number): ModuleShape | null => {
-        if (blocks <= 2) return 'Node1x2';
-
+    const getShapeFromData = (width: number, data: number[], isHighTier: boolean): ModuleShape | null => {
         const points: Point[] = [];
         for (let i = 0; i < data.length; i++) {
-            if (data[i] === 1) points.push({ x: i % width, y: Math.floor(i / width) });
+            if (data[i] === 1) points.push({x: i % width, y: Math.floor(i / width)});
         }
-
         const minX = Math.min(...points.map(p => p.x));
         const minY = Math.min(...points.map(p => p.y));
-        const normalized = points.map(p => ({ x: p.x - minX, y: p.y - minY })).sort((a, b) => a.y === b.y ? a.x - b.x : a.y - b.y);
+        const normalized = points.map(p => ({
+            x: p.x - minX,
+            y: p.y - minY
+        })).sort((a, b) => a.y === b.y ? a.x - b.x : a.y - b.y);
         const hash = JSON.stringify(normalized);
 
         for (const [shape, offsetsList] of PRECOMPUTED_OFFSETS.entries()) {
             for (const offsets of offsetsList) {
                 const offMinX = Math.min(...offsets.map(p => p.x));
                 const offMinY = Math.min(...offsets.map(p => p.y));
-                const offNorm = offsets.map(p => ({ x: p.x - offMinX, y: p.y - offMinY })).sort((a, b) => a.y === b.y ? a.x - b.x : a.y - b.y);
-
+                const offNorm = offsets.map(p => ({
+                    x: p.x - offMinX,
+                    y: p.y - offMinY
+                })).sort((a, b) => a.y === b.y ? a.x - b.x : a.y - b.y);
                 if (JSON.stringify(offNorm) === hash) {
                     if (shape.includes('Base') && isHighTier) continue;
                     if (shape.includes('High') && !isHighTier) continue;
@@ -45,107 +53,97 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
             if (data[i] === 1) {
                 let cx = i % w;
                 let cy = Math.floor(i / w);
-
                 if (flipped) cx = (w - 1) - cx;
-
                 let cw = w;
                 let ch = h;
-
                 for (let r = 0; r < orientation; r++) {
                     const nx = cy;
                     const ny = cw - 1 - cx;
                     cx = nx;
                     cy = ny;
-                    const temp = cw; cw = ch; ch = temp;
+                    const temp = cw;
+                    cw = ch;
+                    ch = temp;
                 }
-                pts.push({ x: cx, y: cy });
+                pts.push({x: cx, y: cy});
             }
         }
-
         if (pts.length === 0) return pts;
-
         const minX = Math.min(...pts.map(p => p.x));
         const minY = Math.min(...pts.map(p => p.y));
-
-        return pts.map(p => ({ x: p.x - minX, y: p.y - minY }));
+        return pts.map(p => ({x: p.x - minX, y: p.y - minY}));
     };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
         setErrorMsg(null);
-
         const reader = new FileReader();
         reader.onload = (evt) => {
             try {
                 const text = evt.target?.result as string;
-
                 const keyIdx = text.indexOf('"mainInvJSON"');
                 if (keyIdx === -1) throw new Error("Could not find mainInvJSON in save file.");
-
                 const colonIdx = text.indexOf(':', keyIdx);
                 const quoteStart = text.indexOf('"', colonIdx);
-
                 let quoteEnd = -1;
                 for (let i = quoteStart + 1; i < text.length; i++) {
                     if (text[i] === '\\') i++;
-                    else if (text[i] === '"') { quoteEnd = i; break; }
+                    else if (text[i] === '"') {
+                        quoteEnd = i;
+                        break;
+                    }
                 }
-
                 if (quoteEnd === -1) throw new Error("Malformed mainInvJSON string.");
-
                 const invStr = JSON.parse(text.substring(quoteStart, quoteEnd + 1));
                 const invData = JSON.parse(invStr);
                 const saveItems = invData.saveItems || [];
-
                 const itemMap = new Map();
                 saveItems.forEach((item: any) => itemMap.set(item.uuid, item));
-
                 const parentMap = new Map();
                 saveItems.forEach((item: any) => {
                     if (item.childItems) {
                         item.childItems.forEach((childId: number) => parentMap.set(childId, item.uuid));
                     }
                 });
-
                 const parsedInventory: InventoryItem[] = [];
-                const newMachines: { id: string, boardIds: (string | null)[][], machineType: string, tier: GridTier }[] = [];
+                const newMachines: {
+                    id: string,
+                    boardIds: (string | null)[][],
+                    machineType: string,
+                    tier: GridTier
+                }[] = [];
                 const machineContents = new Map<number, { invId: string, modifiedShape: any }[]>();
                 const machineDataMap = new Map<number, any>();
-
                 const childrenMap = new Map<number | undefined, any[]>();
                 saveItems.forEach((item: any) => {
                     const pId = parentMap.get(item.uuid);
                     if (!childrenMap.has(pId)) childrenMap.set(pId, []);
                     childrenMap.get(pId)!.push(item);
                 });
-
                 childrenMap.forEach((children) => {
                     children.sort((a, b) => {
                         const aShape = a.itemModifiedShape || a.itemShape || {};
                         const bShape = b.itemModifiedShape || b.itemShape || {};
-                        const aY = aShape['<minY>k__BackingField'] ?? 0;
-                        const bY = bShape['<minY>k__BackingField'] ?? 0;
+                        const aY = aShape['<minY>k__BackingField'] ?? aShape.minY ?? 0;
+                        const bY = bShape['<minY>k__BackingField'] ?? bShape.minY ?? 0;
                         if (aY !== bY) return aY - bY;
-                        const aX = aShape['<minX>k__BackingField'] ?? 0;
-                        const bX = bShape['<minX>k__BackingField'] ?? 0;
+                        const aX = aShape['<minX>k__BackingField'] ?? aShape.minX ?? 0;
+                        const bX = bShape['<minX>k__BackingField'] ?? bShape.minX ?? 0;
                         return aX - bX;
                     });
-
                     const baseCounters: Record<string, number> = {};
                     const customCounters: Record<string, number> = {};
-
                     children.forEach(child => {
                         let baseName = child.name || 'Unknown';
                         let isCustom = false;
                         let resolvedName = baseName;
-
                         const cNameIdx = (child._keys || []).indexOf('CUSTOM_NAME_TAG');
                         if (cNameIdx !== -1 && child._values && child._values[cNameIdx] && child._values[cNameIdx].internalValueString) {
                             resolvedName = child._values[cNameIdx].internalValueString;
                             isCustom = true;
                         }
-
+                        child.isCustomNamed = isCustom;
                         if (baseName === 'Save Bag') {
                             child.numberedName = 'Inv.';
                         } else if (isCustom) {
@@ -162,50 +160,42 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         }
                     });
                 });
-
-                const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm'];
-
-                // parse + import machines
+                const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm', 'evaporator', 'hydroponic', 'printer', 'dna'];
                 saveItems.forEach((item: any) => {
                     const nameLower = (item.name || '').toLowerCase();
                     const typesStr = item.itemTypes?.join(' ').toLowerCase() || '';
                     const keysStr = (item._keys || []).join(' ').toLowerCase();
-
                     const isMachineType = typesStr.includes("machine") || keysStr.includes("standard_machine_tag") || keysStr.includes("machinery");
                     const isActualMachine = machineKeywords.some(kw => nameLower.includes(kw)) && !nameLower.includes("bay") && !nameLower.includes("box") && !nameLower.includes("crate");
-
                     if (isMachineType && isActualMachine) {
                         machineContents.set(item.uuid, []);
                         machineDataMap.set(item.uuid, item);
                     }
                 });
-
-                // parse + import modules
                 saveItems.forEach((item: any) => {
                     const name = item.name || '';
                     const nameLower = name.toLowerCase();
+                    if (nameLower.includes('chemical equipment')) return;
+
                     const _keys = item._keys || [];
                     const typesStr = item.itemTypes?.join(' ').toUpperCase() || '';
-
-                    const allKeysString = (_keys.join(' ') + ' ' + ((item._values || []).map((v:any) => v.internalValueString || '').join(' '))).toUpperCase();
-
+                    const allKeysString = (_keys.join(' ') + ' ' + ((item._values || []).map((v: any) => v.internalValueString || '').join(' '))).toUpperCase();
                     const isModule = (allKeysString.includes("MODULE") ||
                             allKeysString.includes("BONUS_PERCENTAGE_PERFORMANCE_INT") &&
                             typesStr.includes("MODULE")) &&
                         (nameLower.includes('module') || nameLower.includes('node') ||
                             nameLower.includes('core') || nameLower.includes('alarm transmitter module') ||
-                            nameLower.includes('(junk processing)') || nameLower.includes('(blast)')) && (!nameLower.includes('ruined') && !nameLower.includes('corrupted'));
-
+                            nameLower.includes('(junk processing)') || nameLower.includes('(blast)') ||
+                            nameLower.includes('glitched')) && (!nameLower.includes('ruined') && !nameLower.includes('corrupted'));
                     if (!isModule) return;
-
                     let color: ModuleColor = 'White';
-                    let isHighTier = nameLower.includes('overclock') || nameLower.includes('refinement') || nameLower.includes('eco') || nameLower.includes('uncapped');
-
-                    if (nameLower.includes('performance') || nameLower.includes('overclock')) {
+                    const hasEco = /\beco\b/.test(nameLower);
+                    let isHighTier = nameLower.includes('overclock') || nameLower.includes('refinement') || hasEco || nameLower.includes('uncapped');
+                    if (nameLower.includes('performance') || nameLower.includes('overclock') || nameLower.includes('nightmare')) {
                         color = 'Red';
                     } else if (nameLower.includes('quality') || nameLower.includes('refinement')) {
                         color = 'Yellow';
-                    } else if (nameLower.includes('efficiency') || nameLower.includes('eco')) {
+                    } else if (nameLower.includes('efficiency') || hasEco || nameLower.includes('neutralizer') || nameLower.includes('smuggler')) {
                         color = 'Green';
                     } else if (nameLower.includes('neural core')) {
                         color = 'Purple';
@@ -213,23 +203,30 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         color = 'DarkRed';
                     } else if (nameLower.includes('(junk processing)') || nameLower.includes('(blast)')) {
                         color = 'Grey';
+                    } else if (nameLower.includes('evaporator solvent') || nameLower.includes('trait filter') || nameLower.includes('extraction') || nameLower.includes('stabilizer') || nameLower.includes('nutrifruit') || nameLower.includes('metal printer')) {
+                        color = 'Blue';
+                    } else if (nameLower.includes('melee batch')) {
+                        color = 'Gold';
+                    } else if (nameLower.includes('filterweed')) {
+                        color = 'Brown';
+                    } else if (nameLower.includes('hydroreed') || nameLower.includes('kotton auto loom') || nameLower.includes('computer numerical')) {
+                        color = 'DarkGreen';
+                    } else if (nameLower.includes('glitched')) {
+                        color = 'DarkPurple';
                     }
-
                     const shapeData = item.itemShape?.data;
-                    const w = item.itemShape?.['<width>k__BackingField'];
-
+                    const w = item.itemShape?.['<width>k__BackingField'] ?? item.itemShape?.width;
                     if (!shapeData || w === undefined) return;
-
                     const blocks = shapeData.filter((b: number) => b === 1).length;
-                    let shape = getShapeFromData(w, shapeData, isHighTier, blocks);
-
+                    let shape = getShapeFromData(w, shapeData, isHighTier);
                     if (!shape) {
-                        if (blocks <= 2) shape = 'Node1x2';
+                        if (blocks === 2 && w === 2) shape = 'Line1x2';
+                        else if (blocks <= 2) shape = 'Node1x2';
                         else if (blocks === 3) shape = 'L3';
                         else if (blocks === 4) shape = isHighTier ? 'L4_High' : 'L4_Base';
                         else shape = 'P5';
                     }
-
+                    if (shape === 'Node1x2' && color !== 'White') shape = 'Line1x2';
                     const parseEffectStr = (t: string): ItemEffect | null => {
                         if (!t) return null;
                         if (t.includes("PREMIUM")) return "Premium";
@@ -243,7 +240,6 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         if (t.includes("LEARN")) return "Learning Algorithm";
                         return null;
                     };
-
                     const getTagStrObj = (key: string) => {
                         const idx = _keys.indexOf(key);
                         if (idx !== -1 && item._values && item._values[idx] !== undefined) {
@@ -257,10 +253,8 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         }
                         return '';
                     };
-
                     let eff1: ItemEffect = parseEffectStr(getTagStrObj('MODULE_EFFECT1_TAG')) || 'None';
                     let eff2: ItemEffect = parseEffectStr(getTagStrObj('MODULE_EFFECT2_TAG')) || 'None';
-
                     if (eff1 === 'None' && eff2 === 'None') {
                         const foundEffects: ItemEffect[] = [];
                         const tags = [
@@ -274,7 +268,10 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         eff1 = foundEffects.length > 0 ? foundEffects[0] : 'None';
                         eff2 = foundEffects.length > 1 ? foundEffects[1] : 'None';
                     }
-
+                    if (isFixedStatModule({displayName: name})) {
+                        eff1 = 'None';
+                        eff2 = 'None';
+                    }
                     const getIntValObj = (key: string) => {
                         const idx = _keys.indexOf(key);
                         if (idx !== -1 && item._values && item._values[idx] !== undefined) {
@@ -288,33 +285,26 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         }
                         return null;
                     };
-
                     const pVal = getIntValObj("BONUS_PERCENTAGE_PERFORMANCE_INT");
                     const qVal = getIntValObj("BONUS_PERCENTAGE_QUALITY_INT");
                     const eVal = getIntValObj("BONUS_PERCENTAGE_EFFICIENCY_INT");
-
                     let primaryStat: number | null = null;
                     if (color === 'Red' || color === 'Purple') primaryStat = pVal;
                     if (color === 'Yellow') primaryStat = qVal;
                     if (color === 'Green') primaryStat = eVal;
-
                     const actualMaxVal = primaryStat !== null ? Math.abs(primaryStat) : null;
-
-                    const base = getBaseStats({ shape, color, displayName: name });
+                    const base = getBaseStats({shape, color, displayName: name});
                     const maxPositiveBase = Math.max(
                         base.Performance > 0 ? base.Performance : 0,
                         base.Quality > 0 ? base.Quality : 0,
                         base.Efficiency > 0 ? base.Efficiency : 0
                     );
-
                     const defaultDoubleBase = Math.floor(maxPositiveBase * 2);
                     const customVal = actualMaxVal !== null ? actualMaxVal : 0;
-
                     const eff1Val = (eff1 === 'Learning Algorithm' || eff1 === 'Degrading') ? customVal : defaultDoubleBase;
                     const eff2Val = (eff2 === 'Learning Algorithm' || eff2 === 'Degrading') ? customVal : defaultDoubleBase;
-
                     const invId = `${shape}_${color}_${Math.random().toString(36).substring(2, 8)}`;
-
+                    const isStuck = allKeysString.includes('STUCK') || nameLower.includes('glitched');
                     let pathStr = '';
                     let currParentId = parentMap.get(item.uuid);
                     while (currParentId !== undefined) {
@@ -332,7 +322,6 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                     } else if (!pathStr.startsWith('Inv.')) {
                         pathStr = `Inv. > ${pathStr}`;
                     }
-
                     parsedInventory.push({
                         id: invId,
                         shape: shape as any,
@@ -342,9 +331,9 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         effectValues: [eff1Val, eff2Val],
                         isInfinite: false,
                         isLocked: false,
+                        isStuck,
                         originalPath: pathStr
                     } as any);
-
                     const parentId = parentMap.get(item.uuid);
                     if (parentId !== undefined && machineContents.has(parentId)) {
                         machineContents.get(parentId)!.push({
@@ -353,48 +342,39 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         });
                     }
                 });
-
                 machineContents.forEach((contents, machineId) => {
-                    const boardIds = Array.from({ length: 5 }, () => Array.from({ length: 7 }, () => null as string | null));
                     let dropdownName = "Select Machine...";
                     let machineTier: GridTier = 1;
-
                     const parentItem = machineDataMap.get(machineId);
-
                     if (parentItem) {
                         const pKeys = parentItem._keys || [];
                         const pValues = parentItem._values || [];
-
                         let stageVal: number | null = null;
-
                         const upgradeIdx = pKeys.indexOf('MODULE_UPGRADE_STAGE_INT');
                         if (upgradeIdx !== -1 && pValues[upgradeIdx] !== undefined) {
                             stageVal = pValues[upgradeIdx].valueInt;
-                        }
-                        else if (Array.isArray(pValues)) {
+                        } else if (Array.isArray(pValues)) {
                             const valObj = pValues.find((v: any) => v?.['<identifier>k__BackingField'] === 'MODULE_UPGRADE_STAGE_INT');
                             if (valObj && valObj.valueInt !== undefined) {
                                 stageVal = valObj.valueInt;
                             }
                         }
-
                         if (stageVal !== null && stageVal >= 0 && stageVal <= 2) {
                             machineTier = (stageVal + 1) as GridTier;
                         }
-
                         let machinePathStr = '';
                         let currNodeId: number | undefined = machineId;
                         while (currNodeId !== undefined) {
                             const node = itemMap.get(currNodeId);
                             if (node) {
                                 let nodeName = node.numberedName || node.name || 'Unknown';
+                                if (node.uuid === machineId && node.isCustomNamed && node.name) nodeName = `${nodeName} (${node.name})`;
                                 machinePathStr = machinePathStr ? `${nodeName} > ${machinePathStr}` : nodeName;
                                 currNodeId = parentMap.get(node.uuid);
                             } else {
                                 break;
                             }
                         }
-
                         if (machinePathStr) {
                             dropdownName = machinePathStr;
                         } else {
@@ -405,33 +385,34 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                             else if (pName.includes("agewell")) dropdownName = "AgeWell";
                             else if (pName.includes("projector")) dropdownName = "Mirage Projector";
                             else if (pName.includes("desequencer")) dropdownName = "Cryptographic Desequencer";
+                            else if (pName.includes("evaporator")) dropdownName = "Evaporator";
+                            else if (pName.includes("hydroponic")) dropdownName = "Old Hydroponic System";
+                            else if (pName.includes("printer")) dropdownName = "Printer";
+                            else if (pName.includes("dna")) dropdownName = "DNA Manipulator";
                             else if (pName.includes("alarm") || pName.includes("machine")) dropdownName = "Alarm System";
                         }
                     }
-
-                    contents.forEach(({ invId, modifiedShape }) => {
+                    const isEvaporator = isEvaporatorMachine(dropdownName);
+                    const {rows, cols} = getGridSize(isEvaporator);
+                    const boardIds = Array.from({length: rows}, () => Array.from({length: cols}, () => null as string | null));
+                    contents.forEach(({invId, modifiedShape}) => {
                         if (!modifiedShape) return;
-
-                        const w = modifiedShape['<width>k__BackingField'] ?? 1;
-                        const h = modifiedShape['<height>k__BackingField'] ?? 1;
-                        const minX = modifiedShape['<minX>k__BackingField'] ?? 0;
-                        const minY = modifiedShape['<minY>k__BackingField'] ?? 0;
-                        const orientation = modifiedShape['<orientation>k__BackingField'] || 0;
-                        const flipped = modifiedShape['<flipped>k__BackingField'] || false;
+                        const w = modifiedShape['<width>k__BackingField'] ?? modifiedShape.width ?? 1;
+                        const h = modifiedShape['<height>k__BackingField'] ?? modifiedShape.height ?? 1;
+                        const minX = modifiedShape['<minX>k__BackingField'] ?? modifiedShape.minX ?? 0;
+                        const minY = modifiedShape['<minY>k__BackingField'] ?? modifiedShape.minY ?? 0;
+                        const orientation = modifiedShape['<orientation>k__BackingField'] ?? modifiedShape.orientation ?? 0;
+                        const flipped = modifiedShape['<flipped>k__BackingField'] ?? modifiedShape.flipped ?? false;
                         const data = modifiedShape.data || [];
-
                         const pts = getTransformedPoints(w, h, data, orientation, flipped);
-
                         for (const p of pts) {
                             const finalX = minX + p.x;
                             const finalY = minY + p.y;
-
-                            if (finalY >= 0 && finalY < 5 && finalX >= 0 && finalX < 7) {
+                            if (finalY >= 0 && finalY < rows && finalX >= 0 && finalX < cols) {
                                 boardIds[finalY][finalX] = invId;
                             }
                         }
                     });
-
                     newMachines.push({
                         id: `m_${Math.random().toString(36).substring(2, 8)}`,
                         boardIds,
@@ -439,26 +420,24 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                         tier: machineTier
                     });
                 });
-
                 onImport(parsedInventory, newMachines);
             } catch (err) {
                 console.error("Failed to parse save:", err);
                 setErrorMsg("Failed to parse save file. Please ensure it is a valid .es3 save string.");
             }
-
             if (fileInputRef.current) fileInputRef.current.value = '';
         };
         reader.readAsText(file);
     };
 
     return (
-        <div style={{ display: 'inline-block', position: 'relative' }}>
+        <div style={{display: 'inline-block', position: 'relative'}}>
             <input
                 type="file"
                 accept=".es3"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                style={{ display: 'none' }}
+                style={{display: 'none'}}
                 id="save-upload"
             />
             <label
@@ -477,7 +456,15 @@ export default function SaveFileImporter({ onImport }: SaveFileImporterProps) {
                 Import Save (.es3)
             </label>
             {errorMsg && (
-                <div style={{ position: 'absolute', top: '100%', marginTop: '5px', left: 0, color: '#ff4d4d', fontSize: '0.8em', whiteSpace: 'nowrap' }}>
+                <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    marginTop: '5px',
+                    left: 0,
+                    color: '#ff4d4d',
+                    fontSize: '0.8em',
+                    whiteSpace: 'nowrap'
+                }}>
                     {errorMsg}
                 </div>
             )}

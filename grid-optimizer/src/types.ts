@@ -1,11 +1,33 @@
 export type GridTier = 1 | 2 | 3;
-export type ModuleColor = 'White' | 'Red' | 'Yellow' | 'Green' | 'Purple' | 'DarkRed' | 'Grey';
+export type ModuleColor =
+    'White'
+    | 'Red'
+    | 'Yellow'
+    | 'Green'
+    | 'Purple'
+    | 'DarkRed'
+    | 'Grey'
+    | 'Blue'
+    | 'Gold'
+    | 'Brown'
+    | 'DarkGreen'
+    | 'DarkPurple';
 export type ModuleShape =
-    | 'Node1x2' | 'L3' | 'L4_Base' | 'T4_Base' | 'Square4_Base'
+    | 'Node1x2' | 'Line1x2' | 'L3' | 'L4_Base' | 'T4_Base' | 'Square4_Base'
     | 'L4_High' | 'T4_High' | 'Square4_High' | 'P5' | 'C5' | 'Line4';
 
 export type FilterGroup = 'All' | 'Performance' | 'Quality' | 'Efficiency' | 'Special';
-export type ItemEffect = 'None' | 'Premium' | 'Inferior' | 'Overcharged' | 'Degrading' | 'Negative Feedback' | 'Receiver' | 'Side Mount' | 'Top Mount' | 'Learning Algorithm';
+export type ItemEffect =
+    'None'
+    | 'Premium'
+    | 'Inferior'
+    | 'Overcharged'
+    | 'Degrading'
+    | 'Negative Feedback'
+    | 'Receiver'
+    | 'Side Mount'
+    | 'Top Mount'
+    | 'Learning Algorithm';
 
 export interface InventoryItem {
     id: string;
@@ -16,6 +38,7 @@ export interface InventoryItem {
     effectValues: [number, number];
     isInfinite?: boolean;
     isLocked?: boolean;
+    isStuck?: boolean;
     originalPath?: string;
 }
 
@@ -27,6 +50,7 @@ export interface ModuleTemplate {
     shapeType: string;
     displayName: string;
     group: FilterGroup;
+    allowedMachines?: string[];
 }
 
 export interface Stats {
