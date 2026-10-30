@@ -136,7 +136,6 @@ const InventoryItemRow = React.memo(({
                                                 <input
                                                     type="number"
                                                     value={item.effectValues[effectIdx]}
-                                                    value={item.effectValues[effectIdx]}
                                                     onChange={(e) => updateItemEffectValue(item.id, effectIdx as 0 | 1, Number(e.target.value))}
                                                     onBlur={(e) => handleBlurEffectValue(item, effectIdx as 0 | 1, Number(e.target.value))}
                                                     disabled={isAnySolving}
