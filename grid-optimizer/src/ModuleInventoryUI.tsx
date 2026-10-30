@@ -68,7 +68,6 @@ const InventoryItemRow = React.memo(({
                                          onDragStart,
                                          onToggleInfinite,
                                          onToggleLock,
-                                         onToggleStuck
                                      }: any) => {
     const fixedBase = isFixedStatModule(item) ? getBaseStats(item) : null;
     return (
