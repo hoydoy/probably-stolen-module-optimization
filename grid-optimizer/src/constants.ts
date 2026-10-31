@@ -34,6 +34,8 @@ export const STANDARD_GRID_SIZE = {rows: 5, cols: 7};
 export const EVAPORATOR_GRID_SIZE = {rows: 4, cols: 4};
 export const getGridSize = (isEvaporator: boolean) => (isEvaporator ? EVAPORATOR_GRID_SIZE : STANDARD_GRID_SIZE);
 
+export const MACHINE_GROUP_ORDER: string[] = ['Alarm System', 'Furnace', 'Evaporator', 'Hydroponic System', 'DNA Manipulator', '3D Printer'];
+
 export const EFFECTS_LIST: ItemEffect[] = [
     'None', 'Premium', 'Inferior', 'Overcharged', 'Degrading',
     'Negative Feedback', 'Receiver', 'Side Mount', 'Top Mount', 'Learning Algorithm'
@@ -155,7 +157,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Dream Cap Neutralizer Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
+    allowedMachines: ['Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line1x2',
@@ -165,7 +167,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Dream Cap Nightmare Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
+    allowedMachines: ['Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line1x2',
@@ -175,7 +177,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Hydroponic Smuggler Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
+    allowedMachines: ['Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -185,7 +187,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Kotton Auto Loom Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
+    allowedMachines: ['Hydroponic System']
 });
 //MODULE_TEMPLATES.push({ shape: 'Square4_Base', color: 'Gold', size: 4, tier: 'Special', shapeType: 'Square', displayName: 'Chemical Equipment Module', group: 'Special', allowedMachines: ['Blender', 'Heating Plate', 'Chem Finisher'] });
 MODULE_TEMPLATES.push({
@@ -236,7 +238,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Filterweed Production Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
+    allowedMachines: ['Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -246,7 +248,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Hydroreed Filter Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
+    allowedMachines: ['Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -256,7 +258,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Nutrifruit Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
+    allowedMachines: ['Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',

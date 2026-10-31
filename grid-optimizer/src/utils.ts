@@ -1,5 +1,5 @@
-import type {ModuleShape, ModuleColor, Stats, Point, InventoryItem} from './types';
-import {SHAPE_DEFINITIONS, MODULE_TEMPLATES} from './constants';
+import type {ModuleShape, ModuleColor, Stats, Point, InventoryItem, ModuleTemplate} from './types';
+import {SHAPE_DEFINITIONS, MODULE_TEMPLATES, MACHINE_GROUP_ORDER} from './constants';
 
 const STAT_EPSILON = 1e-9;
 export const roundStat = (val: number) => val < 0 ? Math.ceil(val - STAT_EPSILON) : Math.floor(val + STAT_EPSILON);
@@ -225,11 +225,45 @@ export const getStatColor = (val: number) => {
     return val > 0 ? '#4caf50' : (val < 0 ? '#ff4d4d' : '#888');
 };
 
+export const getModuleTemplate = (item: {
+    displayName: string,
+    shape: ModuleShape,
+    color: ModuleColor
+}): ModuleTemplate | undefined =>
+    MODULE_TEMPLATES.find(t => t.displayName === item.displayName && t.shape === item.shape && t.color === item.color)
+    ?? MODULE_TEMPLATES.find(t => t.group === 'Special' && item.displayName.includes(t.displayName))
+    ?? MODULE_TEMPLATES.find(t => t.shape === item.shape && t.color === item.color && !t.allowedMachines?.length);
+
+const getMachineRank = (template: ModuleTemplate) => {
+    if (template.group !== 'Special') return -1;
+    const first = template.allowedMachines?.[0];
+    const idx = first ? MACHINE_GROUP_ORDER.indexOf(first) : -1;
+    return idx >= 0 ? idx + 1 : 0;
+};
+
+export const compareTemplatesByMachine = (a: ModuleTemplate, b: ModuleTemplate) => {
+    const rankA = getMachineRank(a);
+    const rankB = getMachineRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+    return rankA >= 0 ? a.size - b.size : 0;
+};
+
 export const getMachineTypeName = (machineType: string) => {
     const segments = machineType.split('>');
     const last = segments[segments.length - 1].trim();
     const match = last.match(/\(([^()]*)\)\s*$/);
     return match ? match[1] : last;
+};
+
+export const isModuleAllowedInMachine = (item: {
+    displayName: string,
+    shape: ModuleShape,
+    color: ModuleColor
+}, machineType: string): boolean => {
+    const allowedMachines = getModuleTemplate(item)?.allowedMachines;
+    if (!allowedMachines || allowedMachines.length === 0) return true;
+    const typeName = getMachineTypeName(machineType).toLowerCase();
+    return allowedMachines.some(allowed => typeName.includes(allowed.toLowerCase()));
 };
 
 export const isEvaporatorMachine = (machineType: string) => getMachineTypeName(machineType).toLowerCase().includes('evaporator');

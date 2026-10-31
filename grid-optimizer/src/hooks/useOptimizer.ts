@@ -2,7 +2,15 @@ import {useState, useRef, useEffect} from 'react';
 import {createClient} from '@supabase/supabase-js';
 import type {GridTier, InventoryItem, Stats, TargetStats, Point, ModuleShape, ModuleColor, ItemEffect} from '../types';
 import type {Orientation} from '../utils';
-import {getBaseStats, applyInternalEffects, PRECOMPUTED_ORIENTATIONS, roundStat, isEvaporatorMachine} from '../utils';
+import {
+    getBaseStats,
+    applyInternalEffects,
+    PRECOMPUTED_ORIENTATIONS,
+    roundStat,
+    isEvaporatorMachine,
+    isModuleAllowedInMachine,
+    getMachineTypeName
+} from '../utils';
 import {MODULE_TEMPLATES, getGridSize, EVAPORATOR_GRID_SIZE} from '../constants';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://yhiojdutwgfxrgakbrjs.supabase.co';
@@ -758,7 +766,8 @@ const PRIORITY_WEIGHT_STEP = 4;
 const DRAW_TOURNAMENT = 4;
 const TARGET_MET_DRAW_SCALE = 0.25;
 const RESTART_AFTER_STAGNATIONS = 8;
-const BALANCE_PENALTY_WEIGHT = 5;
+const BALANCE_PENALTY_WEIGHT = 20;
+const PAIR_REBUILD_PROBABILITY = 0.35;
 
 const compareTiers = (a: Float64Array, b: Float64Array) => {
     for (let i = 0; i < a.length; i++) {
@@ -1168,6 +1177,10 @@ export const runOptimizationEngine = async (
             if (rebuildAll) {
                 for (let mIdx = 0; mIdx < machineCount; mIdx++) rebuiltMachines.push(mIdx);
                 shuffleInPlace(rebuiltMachines);
+            } else if (machineCount > 1 && Math.random() < PAIR_REBUILD_PROBABILITY) {
+                let partnerMIdx = Math.floor(Math.random() * (machineCount - 1));
+                if (partnerMIdx >= targetMIdx) partnerMIdx++;
+                rebuiltMachines.push(targetMIdx, partnerMIdx);
             } else {
                 rebuiltMachines.push(targetMIdx);
             }
@@ -1275,21 +1288,24 @@ export const runOptimizationEngine = async (
 
                 const fillConfig = machines[fillMIdx];
                 if (machineCount > 1) {
-                    let sumP = 0, sumQ = 0, sumE = 0;
-                    for (let mIdx = 0; mIdx < machineCount; mIdx++) {
-                        const t = currentStats[mIdx].totals;
-                        sumP += t.Performance;
-                        sumQ += t.Quality;
-                        sumE += t.Efficiency;
-                    }
                     const mine = currentStats[fillMIdx].totals;
-                    const laggingOn = (key: keyof Stats, sum: number) =>
-                        !statIsIgnored(fillConfig, key) && fillConfig.maximizeStats[key]
-                        && fillConfig.targetStats[key] === null && mine[key] < sum / machineCount;
+                    const laggingOn = (key: keyof Stats) => {
+                        if (statIsIgnored(fillConfig, key) || !fillConfig.maximizeStats[key] || fillConfig.targetStats[key] !== null) return false;
+                        const myTier = tierOf(fillConfig, key);
+                        let sum = 0, count = 0;
+                        for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+                            const peer = machines[mIdx];
+                            if (statIsIgnored(peer, key) || !peer.maximizeStats[key] || peer.targetStats[key] !== null) continue;
+                            if (tierOf(peer, key) !== myTier) continue;
+                            sum += currentStats[mIdx].totals[key];
+                            count++;
+                        }
+                        return count > 1 && mine[key] < sum / count;
+                    };
 
-                    if (laggingOn('Performance', sumP)) dynWp *= 2.0;
-                    if (laggingOn('Quality', sumQ)) dynWq *= 2.0;
-                    if (laggingOn('Efficiency', sumE)) dynWe *= 2.0;
+                    if (laggingOn('Performance')) dynWp *= 2.0;
+                    if (laggingOn('Quality')) dynWq *= 2.0;
+                    if (laggingOn('Efficiency')) dynWe *= 2.0;
                 }
 
                 const fillBoard = testBoards[fillMIdx];
@@ -1430,23 +1446,22 @@ export const runOptimizationEngine = async (
                         return !statIsIgnored(m, statKey) && m.maximizeStats[statKey] && m.targetStats[statKey] === null;
                     };
 
-                    let sum = 0, count = 0;
-                    let topTier = tierCount - 1;
-                    for (let mIdx = 0; mIdx < machineCount; mIdx++) {
-                        if (!isBalanced(mIdx)) continue;
-                        sum += statsFor(mIdx).totals[statKey];
-                        count++;
-                        const ti = tierOf(machines[mIdx], statKey);
-                        if (ti < topTier) topTier = ti;
-                    }
-                    if (count > 1) {
-                        const avg = sum / count;
-                        let mad = 0;
+                    for (let tier = 0; tier < tierCount; tier++) {
+                        let sum = 0, count = 0;
                         for (let mIdx = 0; mIdx < machineCount; mIdx++) {
-                            if (!isBalanced(mIdx)) continue;
-                            mad += Math.abs(statsFor(mIdx).totals[statKey] - avg);
+                            if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
+                            sum += statsFor(mIdx).totals[statKey];
+                            count++;
                         }
-                        currentTiers[topTier] -= (mad / count) * BALANCE_PENALTY_WEIGHT;
+                        if (count > 1) {
+                            const avg = sum / count;
+                            let mad = 0;
+                            for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+                                if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
+                                mad += Math.abs(statsFor(mIdx).totals[statKey] - avg);
+                            }
+                            currentTiers[tier] -= (mad / count) * BALANCE_PENALTY_WEIGHT;
+                        }
                     }
                 }
             }
@@ -1618,12 +1633,27 @@ export function useOptimizer(
         setMachineType(newType);
         localStorage.setItem(`optimizer_machine_type_${machineId}`, newType);
         const nextIsEvaporator = isEvaporatorMachine(newType);
-        if (nextIsEvaporator === isEvaporator) return;
-        setBoardSync(initializeBoard(tier, undefined, undefined, nextIsEvaporator));
-        setBestTotals({Performance: 0, Quality: 0, Efficiency: 0});
-        setBestPieceStats(new Map());
-        setWarningMsg(null);
-        setSolutionCode('');
+        if (nextIsEvaporator !== isEvaporator) {
+            setBoardSync(initializeBoard(tier, undefined, undefined, nextIsEvaporator));
+            setBestTotals({Performance: 0, Quality: 0, Efficiency: 0});
+            setBestPieceStats(new Map());
+            setWarningMsg(null);
+            setSolutionCode('');
+            return;
+        }
+        if (newType === machineType) return;
+        const removedNames = new Set<string>();
+        const nextBoard = boardRef.current.map(row => row.map(cell => {
+            if (cell && cell !== 'Locked' && !cell.isStuck && !isModuleAllowedInMachine(cell, newType)) {
+                removedNames.add(cell.displayName);
+                return null;
+            }
+            return cell;
+        }));
+        if (removedNames.size > 0) {
+            setBoardSync(nextBoard);
+            setWarningMsg(`Removed ${[...removedNames].join(', ')}: incompatible with ${getMachineTypeName(newType)}.`);
+        }
     };
 
     const resetBoard = () => {
@@ -1643,12 +1673,12 @@ export function useOptimizer(
         setIsSolving(false);
     };
 
-    const isModuleAllowed = (item: InventoryItem): boolean => {
-        const template = MODULE_TEMPLATES.find(m => m.shape === item.shape && m.color === item.color && m.displayName === item.displayName) ||
-            MODULE_TEMPLATES.find(m => m.shape === item.shape && m.color === item.color);
-        if (!template || !template.allowedMachines || template.allowedMachines.length === 0) return true;
-        const currentType = machineType.toLowerCase();
-        return template.allowedMachines.some((allowed: string) => currentType.includes(allowed.toLowerCase()));
+    const isModuleAllowed = (item: InventoryItem): boolean => isModuleAllowedInMachine(item, machineType);
+
+    const checkModuleAllowed = (item: InventoryItem): boolean => {
+        if (isModuleAllowed(item)) return true;
+        setWarningMsg(`Cannot place ${item.displayName}: Incompatible with ${machineType ? getMachineTypeName(machineType) : 'this machine'}.`);
+        return false;
     };
 
     const manuallyPlaceItem = (item: InventoryItem, rootX: number, rootY: number, offsets: Point[]) => {
@@ -1748,19 +1778,17 @@ export function useOptimizer(
                     : 'This solution code was made for a standard (7x5 grid) machine and cannot be imported into an Evaporator.');
                 return;
             }
-            setTier(decodedTier);
-
             const maxP = reader.read(1) === 1;
             const maxQ = reader.read(1) === 1;
             const maxE = reader.read(1) === 1;
-            setMaximizeStats({Performance: maxP, Quality: maxQ, Efficiency: maxE});
+            const importedMax = {Performance: maxP, Quality: maxQ, Efficiency: maxE};
 
             const readTarget = () => {
                 const hasTarget = reader.read(1) === 1;
                 return hasTarget ? reader.read(12) - 2048 : null;
             };
 
-            setTargetStats({Performance: readTarget(), Quality: readTarget(), Efficiency: readTarget()});
+            const importedTargets = {Performance: readTarget(), Quality: readTarget(), Efficiency: readTarget()};
 
             const newInventory: InventoryItem[] = [];
             const newBoard: (InventoryItem | 'Locked' | null)[][] = initializeBoard(decodedTier, undefined, undefined, isEvaporator);
@@ -1823,6 +1851,21 @@ export function useOptimizer(
                 positions.forEach((pos: number) => newBoard[Math.floor(pos / cols)][pos % cols] = newItem);
             }
 
+            if (machineType) {
+                const incompatible = new Set<string>();
+                newBoard.forEach(row => row.forEach(cell => {
+                    if (cell && cell !== 'Locked' && !isModuleAllowedInMachine(cell, machineType)) incompatible.add(cell.displayName);
+                }));
+                if (incompatible.size > 0) {
+                    setWarningMsg(`This solution contains modules that cannot be placed in ${getMachineTypeName(machineType)}: ${[...incompatible].join(', ')}.`);
+                    return;
+                }
+            }
+
+            setTier(decodedTier);
+            setMaximizeStats(importedMax);
+            setTargetStats(importedTargets);
+            setIsInitializedFromSave(true);
             setInventory(newInventory);
             setBoardSync(newBoard);
             setSolutionCode(code);
@@ -1880,7 +1923,7 @@ export function useOptimizer(
                 const newCode = generateCodeFromState(tier, maximizeStats, targetStats, availableForCode, boardToCalculate);
                 setSolutionCode(newCode);
 
-                if (newCode) {
+                if (newCode && !isEvaporator) {
                     if (totals.Performance !== 0 || totals.Quality !== 0 || totals.Efficiency !== 0) {
                         const timer = setTimeout(() => saveToDatabase(tier, totals, newCode, availableForCode), 30000);
                         return () => clearTimeout(timer);
@@ -1890,7 +1933,7 @@ export function useOptimizer(
                 setSolutionCode('');
             }
         }
-    }, [inventory, tier, maximizeStats, targetStats, ignoreStats, statPriority, machineId, getUsedItems, board, isSolving, isExternallySolving]);
+    }, [inventory, tier, maximizeStats, targetStats, ignoreStats, statPriority, machineId, getUsedItems, board, isSolving, isExternallySolving, isEvaporator]);
 
     const runOptimization = async () => {
         if (isSolving) {
@@ -1950,7 +1993,7 @@ export function useOptimizer(
         statPriority, setStatPriority, board, bestTotals, bestPieceStats,
         isSolving, stopOptimization, warningMsg, setWarningMsg,
         solutionCode, setSolutionCode, importSolution, runOptimization, resetBoard,
-        manuallyPlaceItem, manuallyRemoveItem, isValidPlacement, boardRef, applyUpdate,
+        manuallyPlaceItem, manuallyRemoveItem, isValidPlacement, checkModuleAllowed, boardRef, applyUpdate,
         machineType, updateMachineType, isEvaporator
     };
 }

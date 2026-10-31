@@ -9,9 +9,18 @@ import type {
     ModuleColor,
     Point
 } from './types';
-import {COLOR_MAP, EFFECTS_LIST, MODULE_TEMPLATES, NODE_TEMPLATE} from './constants';
-import {formatStatValue, getStatColor, getBaseStats, PRECOMPUTED_OFFSETS, isFixedStatModule} from './utils';
-import {useOptimizer} from './hooks/useOptimizer';
+import {COLOR_MAP, EFFECTS_LIST, MODULE_TEMPLATES, NODE_TEMPLATE, MACHINE_GROUP_ORDER} from './constants';
+import {
+    formatStatValue,
+    getStatColor,
+    getBaseStats,
+    applyInternalEffects,
+    PRECOMPUTED_OFFSETS,
+    isFixedStatModule,
+    getModuleTemplate,
+    compareTemplatesByMachine
+} from './utils';
+import {useOptimizer, runOptimizationEngine} from './hooks/useOptimizer';
 import MiniShape from './components/MiniShape';
 import SaveFileImporter from './components/SaveFileImporter';
 
@@ -67,9 +76,10 @@ const InventoryItemRow = React.memo(({
                                          onRemove,
                                          onDragStart,
                                          onToggleInfinite,
-                                         onToggleLock,
+                                         onToggleLock
                                      }: any) => {
     const fixedBase = isFixedStatModule(item) ? getBaseStats(item) : null;
+    const shownStats = item.color !== 'White' ? (fixedBase ?? applyInternalEffects(item)) : null;
     return (
         <div
             onMouseDown={(e) => onDragStart(e, item)}
@@ -91,6 +101,28 @@ const InventoryItemRow = React.memo(({
                 <div style={{display: 'flex', flexDirection: 'column', flex: 1, gap: '4px', pointerEvents: 'none'}}>
                     <span style={{fontSize: '0.9em', fontWeight: 'bold', color: '#eee'}}>{item.displayName}</span>
 
+                    {shownStats && (
+                        <div style={{
+                            display: 'flex',
+                            gap: '10px',
+                            flexWrap: 'wrap',
+                            fontSize: '0.75em',
+                            fontWeight: 'bold'
+                        }}>
+                            {(['Performance', 'Quality', 'Efficiency'] as const).map(stat => shownStats[stat] !== 0 ? (
+                                <span key={stat} style={{color: getStatColor(shownStats[stat])}}>
+                                    {{
+                                        Performance: 'Perf',
+                                        Quality: 'Qual',
+                                        Efficiency: 'Eff'
+                                    }[stat]} {formatStatValue(shownStats[stat])}
+                                </span>
+                            ) : null)}
+                            {shownStats.Performance === 0 && shownStats.Quality === 0 && shownStats.Efficiency === 0 && (
+                                <span style={{color: '#888'}}>No stat changes</span>
+                            )}
+                        </div>
+                    )}
                     {item.color !== 'White' && !fixedBase ? (
                         <div style={{
                             display: 'flex',
@@ -159,28 +191,7 @@ const InventoryItemRow = React.memo(({
                                 );
                             })}
                         </div>
-                    ) : fixedBase ? (
-                        <div style={{
-                            display: 'flex',
-                            gap: '10px',
-                            flexWrap: 'wrap',
-                            fontSize: '0.75em',
-                            fontWeight: 'bold'
-                        }}>
-                            {(['Performance', 'Quality', 'Efficiency'] as const).map(stat => fixedBase[stat] !== 0 ? (
-                                <span key={stat} style={{color: getStatColor(fixedBase[stat])}}>
-                                    {{
-                                        Performance: 'Perf',
-                                        Quality: 'Qual',
-                                        Efficiency: 'Eff'
-                                    }[stat]} {formatStatValue(fixedBase[stat])}
-                                </span>
-                            ) : null)}
-                            {fixedBase.Performance === 0 && fixedBase.Quality === 0 && fixedBase.Efficiency === 0 && (
-                                <span style={{color: '#888'}}>No stat changes</span>
-                            )}
-                        </div>
-                    ) : (
+                    ) : item.color !== 'White' ? null : (
                         <div style={{display: 'flex', alignItems: 'center', width: '100%', pointerEvents: 'auto'}}
                              onMouseDown={(e) => e.stopPropagation()}>
                             <label style={{
@@ -282,6 +293,8 @@ const MachineInstance = React.memo(forwardRef(({
                                                    onDragTargetRefChange,
                                                    isAnySolving,
                                                    isThisMachineSolving,
+                                                   isGlobalSolving,
+                                                   onStopGlobal,
                                                    canDelete
                                                }: any, ref) => {
     const optimizer = useOptimizer(inventory, setInventory, machineId, getUsedItems, 3, isAnySolving);
@@ -293,6 +306,7 @@ const MachineInstance = React.memo(forwardRef(({
     });
 
     const currentSolving = optimizer.isSolving || isThisMachineSolving;
+    const runBlocked = !currentSolving && (inventory.length === 0 || isGlobalSolving);
 
     const [machineType, setMachineType] = useState(() => {
         return localStorage.getItem(`optimizer_machine_type_${machineId}`) || 'Select Machine...';
@@ -331,9 +345,11 @@ const MachineInstance = React.memo(forwardRef(({
             maximizeStats: optimizer.maximizeStats,
             targetStats: optimizer.targetStats,
             ignoreStats: optimizer.ignoreStats,
-            statPriority: optimizer.statPriority
+            statPriority: optimizer.statPriority,
+            machineType: optimizer.machineType
         }),
         isValidPlacement: optimizer.isValidPlacement,
+        checkModuleAllowed: optimizer.checkModuleAllowed,
         getBoard: () => optimizer.boardRef.current,
         applyUpdate: optimizer.applyUpdate,
         isLocked: () => isMachineLocked
@@ -915,17 +931,18 @@ const MachineInstance = React.memo(forwardRef(({
                                 if (currentSolving) {
                                     optimizer.stopOptimization();
                                     onSolvingChange(machineId, false);
+                                    if (isGlobalSolving) onStopGlobal();
                                 } else {
                                     optimizer.runOptimization();
                                 }
                             }}
-                            disabled={inventory.length === 0 && !currentSolving}
+                            disabled={runBlocked}
                             style={{
                                 flex: 2, padding: '8px', fontSize: '0.85em',
                                 backgroundColor: currentSolving ? '#ff4d4d' : '#4caf50',
                                 color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold',
-                                cursor: (inventory.length === 0 && !currentSolving) ? 'not-allowed' : 'pointer',
-                                opacity: (inventory.length === 0 && !currentSolving) ? 0.5 : 1
+                                cursor: runBlocked ? 'not-allowed' : 'pointer',
+                                opacity: runBlocked ? 0.5 : 1
                             }}
                         >
                             {currentSolving ? 'Stop Optimizer' : 'Run Optimizer'}
@@ -1144,6 +1161,8 @@ export default function ModuleInventoryUI() {
 
     const machinesRef = useRef<Record<string, any>>({});
     const [solvingStates, setSolvingStates] = useState<Record<string, boolean>>({});
+    const globalSolveRef = useRef(false);
+    const [isGlobalSolving, setIsGlobalSolving] = useState(false);
 
     const getUsedItems = useCallback((excludeId?: string | null) => {
         const used = new Set<string>();
@@ -1167,11 +1186,13 @@ export default function ModuleInventoryUI() {
     }, []);
 
     const [filterGroup, setFilterGroup] = useState<FilterGroup>('All');
-    const [filterSize, setFilterSize] = useState<'All' | 3 | 4 | 5>('All');
+    const [filterSize, setFilterSize] = useState<'All' | 2 | 3 | 4 | 5>('All');
 
     const [invFilterGroup, setInvFilterGroup] = useState<FilterGroup | 'Placed' | 'NotPlaced'>('All');
-    const [invFilterSize, setInvFilterSize] = useState<'All' | 3 | 4 | 5>('All');
+    const [invFilterSize, setInvFilterSize] = useState<'All' | 2 | 3 | 4 | 5>('All');
     const [invFilterEffect, setInvFilterEffect] = useState<ItemEffect | 'All'>('All');
+    const [filterMachine, setFilterMachine] = useState<string>('All');
+    const [invFilterMachine, setInvFilterMachine] = useState<string>('All');
 
     const [hoverInfo, setHoverInfo] = useState<{
         x: number,
@@ -1247,6 +1268,7 @@ export default function ModuleInventoryUI() {
 
                     if ((currentDrag.item.isLocked || currentDrag.item.isStuck) && currentDrag.sourceMachineId !== currentTarget.machineId) {
                     } else if (machine) {
+                        machine.checkModuleAllowed(currentDrag.item);
                         const targetX = currentTarget.x - currentDrag.dragOffsetX;
                         const targetY = currentTarget.y - currentDrag.dragOffsetY;
 
@@ -1503,11 +1525,15 @@ export default function ModuleInventoryUI() {
         window.dispatchEvent(evt);
     }, [isAnySolving]);
 
+    const machineFilterOptions = MACHINE_GROUP_ORDER.filter(name => MODULE_TEMPLATES.some(t => t.allowedMachines?.includes(name)));
+
     const filteredModules = MODULE_TEMPLATES.filter(m => {
         if (m.shapeType === 'Node') return false;
         if (filterGroup !== 'All' && m.group !== filterGroup) return false;
-        return !(filterSize !== 'All' && m.size !== filterSize);
-    });
+        if (filterSize !== 'All' && m.size !== filterSize) return false;
+        if (filterMachine === 'None') return !m.allowedMachines || m.allowedMachines.length === 0;
+        return filterMachine === 'All' || !!m.allowedMachines?.includes(filterMachine);
+    }).sort(compareTemplatesByMachine);
 
     const allUsedItems = getUsedItems(null);
     const filteredInventory = inventory.filter(item => {
@@ -1532,6 +1558,14 @@ export default function ModuleInventoryUI() {
                 if (item.effects[0] !== 'None' || item.effects[1] !== 'None') return false;
             } else {
                 if (item.effects[0] !== invFilterEffect && item.effects[1] !== invFilterEffect) return false;
+            }
+        }
+        if (invFilterMachine !== 'All') {
+            const allowed = getModuleTemplate(item)?.allowedMachines;
+            if (invFilterMachine === 'None') {
+                if (allowed && allowed.length > 0) return false;
+            } else if (!allowed || !allowed.includes(invFilterMachine)) {
+                return false;
             }
         }
         return true;
@@ -1586,15 +1620,67 @@ export default function ModuleInventoryUI() {
         ? [...filteredModules, NODE_TEMPLATE]
         : [NODE_TEMPLATE, ...filteredModules];
 
-    const handleRunAll = () => {
+    const handleStopGlobal = useCallback(() => {
+        globalSolveRef.current = false;
+    }, []);
+
+    const handleRunAll = async () => {
         if (isAnySolving) {
+            globalSolveRef.current = false;
             Object.values(machinesRef.current).forEach((m: any) => m?.stop());
-        } else {
-            Object.values(machinesRef.current).forEach((m: any) => {
-                if (m && typeof m.isLocked === 'function' && !m.isLocked()) {
-                    m.run();
+            return;
+        }
+
+        const statKeys = ['Performance', 'Quality', 'Efficiency'] as const;
+        const participants = Object.entries(machinesRef.current)
+            .filter(([, m]: [string, any]) => m && typeof m.isLocked === 'function' && !m.isLocked())
+            .map(([id, m]: [string, any]) => ({id, handle: m, state: m.getState()}))
+            .filter(p => statKeys.some(key => !p.state.ignoreStats[key] && (p.state.maximizeStats[key] || p.state.targetStats[key] !== null)));
+        if (participants.length === 0) return;
+
+        const participantIds = new Set(participants.map(p => p.id));
+        const reserved = new Set<string>();
+        Object.entries(machinesRef.current).forEach(([id, m]: [string, any]) => {
+            if (!m || participantIds.has(id)) return;
+            m.getBoard()?.forEach((row: any[]) => row.forEach((cell: any) => {
+                if (cell && cell !== 'Locked') reserved.add(cell.id);
+            }));
+        });
+
+        const engineInventory = expandedInventory.map(item =>
+            (reserved.has(item.id) || item.isStuck) ? {...item, isLocked: true} : item
+        );
+        const configs = participants.map(p => ({
+            id: p.id,
+            tier: p.state.tier,
+            targetStats: p.state.targetStats,
+            maximizeStats: p.state.maximizeStats,
+            ignoreStats: p.state.ignoreStats,
+            statPriority: p.state.statPriority,
+            machineType: p.state.machineType
+        }));
+
+        globalSolveRef.current = true;
+        setIsGlobalSolving(true);
+        participants.forEach(p => handleSolvingChange(p.id, true));
+        try {
+            await runOptimizationEngine(
+                configs,
+                participants.map(p => p.handle.getBoard()),
+                engineInventory,
+                expandedInventory,
+                globalSolveRef,
+                (updates) => {
+                    participants.forEach(p => {
+                        const u = updates.get(p.id);
+                        if (u) p.handle.applyUpdate(u.board, u.totals, u.pieceStats, u.code);
+                    });
                 }
-            });
+            );
+        } finally {
+            globalSolveRef.current = false;
+            participants.forEach(p => handleSolvingChange(p.id, false));
+            setIsGlobalSolving(false);
         }
     };
 
@@ -1967,6 +2053,8 @@ export default function ModuleInventoryUI() {
                         onDragTargetRefChange={setDragTargetRefChange}
                         isAnySolving={isAnySolving}
                         isThisMachineSolving={solvingStates[m.id] || false}
+                        isGlobalSolving={isGlobalSolving}
+                        onStopGlobal={handleStopGlobal}
                         canDelete={machines.length > 1}
                     />
                 ))}
@@ -2102,9 +2190,24 @@ export default function ModuleInventoryUI() {
                                     outline: 'none'
                                 }}>
                             <option value="All">All Sizes</option>
+                            <option value={2}>Size 2</option>
                             <option value={3}>Size 3</option>
                             <option value={4}>Size 4</option>
                             <option value={5}>Size 5</option>
+                        </select>
+                        <select value={filterMachine} onChange={(e) => setFilterMachine(e.target.value)} style={{
+                            flex: 1,
+                            minWidth: '150px',
+                            padding: '8px 12px',
+                            backgroundColor: '#333',
+                            color: 'white',
+                            border: '1px solid #555',
+                            borderRadius: '4px',
+                            outline: 'none'
+                        }}>
+                            <option value="All">All Machines</option>
+                            <option value="None">No Machine Restriction</option>
+                            {machineFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
                         </select>
                     </div>
 
@@ -2257,6 +2360,7 @@ export default function ModuleInventoryUI() {
                                     fontSize: '0.8em'
                                 }}>
                             <option value="All">All Sizes</option>
+                            <option value={2}>Size 2</option>
                             <option value={3}>Size 3</option>
                             <option value={4}>Size 4</option>
                             <option value={5}>Size 5</option>
@@ -2276,6 +2380,21 @@ export default function ModuleInventoryUI() {
                             <option value="All">All Effects</option>
                             {EFFECTS_LIST.map(eff => <option key={eff}
                                                              value={eff}>{eff === 'None' ? 'No Effect' : eff}</option>)}
+                        </select>
+                        <select value={invFilterMachine} onChange={(e) => setInvFilterMachine(e.target.value)} style={{
+                            flex: 1,
+                            minWidth: '120px',
+                            padding: '6px',
+                            backgroundColor: '#333',
+                            color: 'white',
+                            border: '1px solid #555',
+                            borderRadius: '4px',
+                            outline: 'none',
+                            fontSize: '0.8em'
+                        }}>
+                            <option value="All">All Machines</option>
+                            <option value="None">No Machine Restriction</option>
+                            {machineFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
                         </select>
                     </div>
 
