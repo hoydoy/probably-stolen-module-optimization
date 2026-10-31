@@ -155,7 +155,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Dream Cap Neutralizer Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System']
+    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line1x2',
@@ -165,7 +165,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Dream Cap Nightmare Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System']
+    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line1x2',
@@ -175,7 +175,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Hydroponic Smuggler Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System']
+    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -185,7 +185,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Kotton Auto Loom Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System']
+    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
 });
 //MODULE_TEMPLATES.push({ shape: 'Square4_Base', color: 'Gold', size: 4, tier: 'Special', shapeType: 'Square', displayName: 'Chemical Equipment Module', group: 'Special', allowedMachines: ['Blender', 'Heating Plate', 'Chem Finisher'] });
 MODULE_TEMPLATES.push({
@@ -236,7 +236,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Filterweed Production Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System']
+    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -246,7 +246,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Hydroreed Filter Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System']
+    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -256,7 +256,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Nutrifruit Hydroponic Module',
     group: 'Special',
-    allowedMachines: ['Old Hydroponic System']
+    allowedMachines: ['Old Hydroponic System', 'Hydroponic System']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -266,7 +266,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Computer Numerical Control Module',
     group: 'Special',
-    allowedMachines: ['Printer']
+    allowedMachines: ['3D Printer']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -276,7 +276,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Melee Batch Module',
     group: 'Special',
-    allowedMachines: ['Printer']
+    allowedMachines: ['3D Printer']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -286,7 +286,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Metal Printer Module',
     group: 'Special',
-    allowedMachines: ['Printer']
+    allowedMachines: ['3D Printer']
 });
 MODULE_TEMPLATES.push({
     shape: 'Square4_Base',

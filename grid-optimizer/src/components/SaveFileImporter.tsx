@@ -160,7 +160,7 @@ export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
                         }
                     });
                 });
-                const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm', 'evaporator', 'hydroponic', 'printer', 'dna'];
+                const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm', 'evaporator', 'hydroponic', '3d printer', 'dna'];
                 saveItems.forEach((item: any) => {
                     const nameLower = (item.name || '').toLowerCase();
                     const typesStr = item.itemTypes?.join(' ').toLowerCase() || '';
@@ -386,8 +386,8 @@ export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
                             else if (pName.includes("projector")) dropdownName = "Mirage Projector";
                             else if (pName.includes("desequencer")) dropdownName = "Cryptographic Desequencer";
                             else if (pName.includes("evaporator")) dropdownName = "Evaporator";
-                            else if (pName.includes("hydroponic")) dropdownName = "Old Hydroponic System";
-                            else if (pName.includes("printer")) dropdownName = "Printer";
+                            else if (pName.includes("hydroponic")) dropdownName = "Hydroponic System";
+                            else if (pName.includes("3d printer")) dropdownName = "3D Printer";
                             else if (pName.includes("dna")) dropdownName = "DNA Manipulator";
                             else if (pName.includes("alarm") || pName.includes("machine")) dropdownName = "Alarm System";
                         }
