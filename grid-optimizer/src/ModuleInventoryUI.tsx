@@ -1473,7 +1473,7 @@ export default function ModuleInventoryUI() {
         const clampedValue = Math.max(minLimit, Math.min(maxLimit, val));
 
         setInventory(prev => prev.map(invItem => {
-            if (invItem.id === invItem.id) {
+            if (invItem.id === item.id) {
                 const updatedValues: [number, number] = [...invItem.effectValues] as [number, number];
                 updatedValues[effectIndex] = clampedValue;
                 return {...invItem, effectValues: updatedValues};
