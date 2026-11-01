@@ -548,6 +548,10 @@ export const buildPlacementContext = (piece: InventoryItem, precomputedInternal:
 
 const NEIGHBOR_SCRATCH: InventoryItem[] = [];
 
+const isPureNegativeScored = (s: Stats, ignP: boolean, ignQ: boolean, ignE: boolean) =>
+    (ignP || s.Performance <= 0) && (ignQ || s.Quality <= 0) && (ignE || s.Efficiency <= 0)
+    && ((!ignP && s.Performance < 0) || (!ignQ && s.Quality < 0) || (!ignE && s.Efficiency < 0));
+
 export const evaluatePlacementDelta = (
     ctx: PlacementContext,
     x: number, y: number,
@@ -568,7 +572,11 @@ export const evaluatePlacementDelta = (
     }
 
     const {xs, ys, count} = orientation;
-    const {internal, isWhite, nfCount, isPureNegative} = ctx;
+    const {internal, isWhite, nfCount} = ctx;
+    const ignP = statIsIgnored(config, 'Performance');
+    const ignQ = statIsIgnored(config, 'Quality');
+    const ignE = statIsIgnored(config, 'Efficiency');
+    const isPureNegative = isPureNegativeScored(internal, ignP, ignQ, ignE);
 
     let isConnected = false;
     let adjNodes = 0;
@@ -596,9 +604,7 @@ export const evaluatePlacementDelta = (
             if (isWhite) {
                 if (!adjIsWhite) {
                     const adjInt = precomputedInternal.get(adjCell.id);
-                    if (adjInt !== undefined &&
-                        adjInt.Performance <= 0 && adjInt.Quality <= 0 && adjInt.Efficiency <= 0 &&
-                        (adjInt.Performance < 0 || adjInt.Quality < 0 || adjInt.Efficiency < 0)) {
+                    if (adjInt !== undefined && isPureNegativeScored(adjInt, ignP, ignQ, ignE)) {
                         negativeContactCount++;
                     }
                 }
@@ -735,6 +741,8 @@ export type MachineConfig = {
 
 const STAT_KEYS: (keyof Stats)[] = ['Performance', 'Quality', 'Efficiency'];
 
+export const isLumpyModule = (item: InventoryItem) => item.displayName.includes('Neural Core');
+
 export const isSpecialModule = (item: InventoryItem) =>
     item.displayName.includes('Alarm Transmitter Module')
     || item.displayName.includes('Junk Processing')
@@ -766,8 +774,10 @@ const PRIORITY_WEIGHT_STEP = 4;
 const DRAW_TOURNAMENT = 4;
 const TARGET_MET_DRAW_SCALE = 0.25;
 const RESTART_AFTER_STAGNATIONS = 8;
-const BALANCE_PENALTY_WEIGHT = 20;
+const BALANCE_PENALTY_WEIGHT = 14;
 const PAIR_REBUILD_PROBABILITY = 0.35;
+const SPECIAL_RELOCATE_PROBABILITY = 0.6;
+const SPECIAL_EXPLORE_PROBABILITY = 0.25;
 
 const compareTiers = (a: Float64Array, b: Float64Array) => {
     for (let i = 0; i < a.length; i++) {
@@ -1029,6 +1039,48 @@ export const runOptimizationEngine = async (
         return tables;
     });
 
+    const isIneligible = machines.map((m, mIdx) => {
+        const flags = new Uint8Array(searchPool.length);
+        const board = currentBoards[mIdx];
+        const isSmallGrid = board.length === EVAPORATOR_GRID_SIZE.rows && (board[0]?.length ?? 0) === EVAPORATOR_GRID_SIZE.cols;
+        for (let i = 0; i < searchPool.length; i++) {
+            if (!isLumpyModule(searchPool[i])) continue;
+            const s = ctxByIndex[i].internal;
+            let usedValue = 0;
+            let wastedValue = 0;
+            for (const key of STAT_KEYS) {
+                if (s[key] <= 0) continue;
+                if (!statIsIgnored(m, key) && (m.maximizeStats[key] || m.targetStats[key] !== null)) usedValue += s[key];
+                else wastedValue += s[key];
+            }
+            if (isSmallGrid || wastedValue > usedValue) flags[i] = 1;
+        }
+        return flags;
+    });
+
+    const lumpyIds = fullInventory.filter(isLumpyModule).map(item => item.id);
+    const balanceVals: Stats[] = machines.map(() => ({Performance: 0, Quality: 0, Efficiency: 0}));
+
+    const countAdjacentNodes = (board: (InventoryItem | 'Locked' | null)[][], id: string) => {
+        const rows = board.length;
+        const cols = board[0]?.length || 7;
+        const nodeIds = new Set<string>();
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                const cell = board[y][x];
+                if (!cell || cell === 'Locked' || cell.id !== id) continue;
+                for (let d = 0; d < 4; d++) {
+                    const nx = x + NEIGHBOR_DX[d];
+                    const ny = y + NEIGHBOR_DY[d];
+                    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+                    const adj = board[ny][nx];
+                    if (adj && adj !== 'Locked' && adj.color === 'White') nodeIds.add(adj.id);
+                }
+            }
+        }
+        return nodeIds.size;
+    };
+
     const placedMark = new Int32Array(searchPool.length);
     const consumedMark = new Int32Array(searchPool.length);
     let markGen = 0;
@@ -1126,6 +1178,100 @@ export const runOptimizationEngine = async (
         return true;
     };
 
+    const candX: number[] = [];
+    const candY: number[] = [];
+    const candO: Orientation[] = [];
+    const candScore: number[] = [];
+
+    const packingScore = (board: (InventoryItem | 'Locked' | null)[][], x: number, y: number, orientation: Orientation) => {
+        const rows = board.length;
+        const cols = board[0]?.length || 7;
+        let score = 0;
+        for (let i = 0; i < orientation.count; i++) {
+            const px = x + orientation.xs[i];
+            const py = y + orientation.ys[i];
+            for (let d = 0; d < 4; d++) {
+                const nx = px + NEIGHBOR_DX[d];
+                const ny = py + NEIGHBOR_DY[d];
+                if (nx < 0 || nx >= cols || ny < 0 || ny >= rows || board[ny][nx] !== null) score++;
+            }
+        }
+        return score;
+    };
+
+    const placeSpecialFlexibly = (
+        ctx: PlacementContext,
+        orientations: Orientation[],
+        piece: InventoryItem,
+        fillBoard: (InventoryItem | 'Locked' | null)[][],
+        fillBoardEmpty: boolean,
+        dynWp: number, dynWq: number, dynWe: number,
+        currentP: number, currentQ: number, currentE: number,
+        config: MachineConfig,
+        incumbent: { x: number; y: number; orientation: Orientation } | null
+    ) => {
+        const rows = fillBoard.length;
+        const cols = fillBoard[0]?.length || 7;
+        candX.length = 0;
+        candY.length = 0;
+        candO.length = 0;
+        candScore.length = 0;
+        let best = -Infinity;
+
+        for (let c = 0; c < freeCells.length; c++) {
+            const idx = freeCells[c];
+            const x = idx % cols;
+            const y = (idx - x) / cols;
+            for (let o = 0; o < orientations.length; o++) {
+                const orientation = orientations[o];
+                if (x + orientation.minX < 0 || x + orientation.maxX >= cols ||
+                    y + orientation.minY < 0 || y + orientation.maxY >= rows) continue;
+                const score = evaluatePlacementDelta(
+                    ctx, x, y, orientation, fillBoard, fillBoardEmpty,
+                    precomputedInternal, dynWp, dynWq, dynWe, currentP, currentQ, currentE, config
+                );
+                if (score === -Infinity) continue;
+                candX.push(x);
+                candY.push(y);
+                candO.push(orientation);
+                candScore.push(score);
+                if (score > best) best = score;
+            }
+        }
+
+        if (candX.length === 0) {
+            return placeBestFit(ctx, orientations, piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe, currentP, currentQ, currentE, config, incumbent);
+        }
+
+        const valuable = best > 0;
+        const threshold = valuable ? best * 0.75 : best - 500;
+        const explore = Math.random() < SPECIAL_EXPLORE_PROBABILITY;
+        let chosen = -1;
+        let chosenPack = -1;
+        let eligibleCount = 0;
+        for (let k = 0; k < candX.length; k++) {
+            if (candScore[k] < threshold) continue;
+            eligibleCount++;
+            if (valuable || explore) {
+                if (Math.random() * eligibleCount < 1) chosen = k;
+                continue;
+            }
+            const pack = packingScore(fillBoard, candX[k], candY[k], candO[k]);
+            if (pack > chosenPack || (pack === chosenPack && Math.random() < 0.5)) {
+                chosenPack = pack;
+                chosen = k;
+            }
+        }
+        if (chosen === -1) return false;
+
+        const {xs, ys, count} = candO[chosen];
+        for (let i = 0; i < count; i++) {
+            fillBoard[candY[chosen] + ys[i]][candX[chosen] + xs[i]] = piece;
+        }
+        compactFreeCells(fillBoard);
+        return true;
+    };
+
     let pendingUpdate = false;
     const flushUpdate = () => {
         if (!pendingUpdate) return;
@@ -1215,15 +1361,7 @@ export const runOptimizationEngine = async (
                             const cell = board[y][x];
                             if (!cell || cell === 'Locked') continue;
 
-                            if (cell.isStuck) {
-                                let entry = specialsOnBoard[mIdx].find(e => e.piece.id === cell.id);
-                                if (entry === undefined) {
-                                    entry = {piece: cell, cells: []};
-                                    specialsOnBoard[mIdx].push(entry);
-                                }
-                                entry.cells.push(y * cols + x);
-                                continue;
-                            }
+                            if (cell.isStuck) continue;
 
                             if (isSpecialModule(cell) || cell.isLocked) {
                                 let entry = specialsOnBoard[mIdx].find(e => e.piece.id === cell.id);
@@ -1352,11 +1490,18 @@ export const runOptimizationEngine = async (
                         fillBoard[(idx - cx) / cols][cx] = null;
                         freeCells.push(idx);
                     }
-                    placeBestFit(
-                        ctx, orientations, special.piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe,
-                        currentTotals.Performance, currentTotals.Quality, currentTotals.Efficiency, fillConfig,
-                        home === null ? null : {x: homeX, y: homeY, orientation: home}
-                    );
+                    const incumbent = home === null ? null : {x: homeX, y: homeY, orientation: home};
+                    if (Math.random() < SPECIAL_RELOCATE_PROBABILITY) {
+                        placeSpecialFlexibly(
+                            ctx, orientations, special.piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe,
+                            currentTotals.Performance, currentTotals.Quality, currentTotals.Efficiency, fillConfig, incumbent
+                        );
+                    } else {
+                        placeBestFit(
+                            ctx, orientations, special.piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe,
+                            currentTotals.Performance, currentTotals.Quality, currentTotals.Efficiency, fillConfig, incumbent
+                        );
+                    }
                     fillBoardEmpty = false;
                     currentTotals = calculateBoardStats(fillBoard, fullInventory, inventoryById).totals;
                 }
@@ -1388,6 +1533,7 @@ export const runOptimizationEngine = async (
 
                     if (placedMark[pieceIdx] === markGen) continue;
                     if (consumedMark[pieceIdx] === consumedGen) continue;
+                    if (isIneligible[fillMIdx][pieceIdx] === 1) continue;
 
                     const piece = searchPool[pieceIdx];
                     if (infeasibleShapes.has(piece.shape)) continue;
@@ -1440,6 +1586,23 @@ export const runOptimizationEngine = async (
             currentTiers[tierCount] -= totalPiecesPlaced * 5;
 
             if (machineCount > 1) {
+                for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+                    const stats = statsFor(mIdx);
+                    const board = isRebuilt[mIdx] ? testBoards[mIdx] : currentBoards[mIdx];
+                    const vals = balanceVals[mIdx];
+                    vals.Performance = stats.totals.Performance;
+                    vals.Quality = stats.totals.Quality;
+                    vals.Efficiency = stats.totals.Efficiency;
+                    for (const id of lumpyIds) {
+                        const own = stats.pieceStats.get(id);
+                        if (own === undefined) continue;
+                        const factor = 1 + 0.2 * countAdjacentNodes(board, id);
+                        vals.Performance -= own.Performance * factor;
+                        vals.Quality -= own.Quality * factor;
+                        vals.Efficiency -= own.Efficiency * factor;
+                    }
+                }
+
                 for (const statKey of STAT_KEYS) {
                     const isBalanced = (mIdx: number) => {
                         const m = machines[mIdx];
@@ -1450,7 +1613,7 @@ export const runOptimizationEngine = async (
                         let sum = 0, count = 0;
                         for (let mIdx = 0; mIdx < machineCount; mIdx++) {
                             if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
-                            sum += statsFor(mIdx).totals[statKey];
+                            sum += balanceVals[mIdx][statKey];
                             count++;
                         }
                         if (count > 1) {
@@ -1458,7 +1621,7 @@ export const runOptimizationEngine = async (
                             let mad = 0;
                             for (let mIdx = 0; mIdx < machineCount; mIdx++) {
                                 if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
-                                mad += Math.abs(statsFor(mIdx).totals[statKey] - avg);
+                                mad += Math.abs(balanceVals[mIdx][statKey] - avg);
                             }
                             currentTiers[tier] -= (mad / count) * BALANCE_PENALTY_WEIGHT;
                         }
