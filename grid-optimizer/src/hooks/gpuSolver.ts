@@ -37,7 +37,7 @@ export type EngineRunner = (
     fullInventory: InventoryItem[],
     isSolvingRef: { current: boolean },
     onUpdate: (updates: EngineUpdate) => void,
-    //onStatus?: (status: SolverStatus) => void
+    onStatus?: (status: SolverStatus) => void
 ) => Promise<void>;
 
 const MMAX = 8;
@@ -1026,10 +1026,11 @@ export const runGpuEngine: EngineRunner = async (
     searchPoolInventory,
     fullInventory,
     isSolvingRef,
-    onUpdate
+    onUpdate,
+    onStatus
 ) => {
-    const fallback = async (_reason: string, boards: any[][][] = initialBoards) => {
-        //onStatus?.({ backend: 'cpu', fallback: true, message: `GPU unavailable (${reason}). Using the CPU solver.` });
+    const fallback = async (reason: string, boards: any[][][] = initialBoards) => {
+        onStatus?.({ backend: 'cpu', fallback: true, message: `GPU unavailable (${reason}). Using the CPU solver.` });
         await runOptimizationEngine(machines, boards, searchPoolInventory, fullInventory, isSolvingRef, onUpdate);
     };
 
@@ -1092,9 +1093,9 @@ export const runGpuEngine: EngineRunner = async (
     let dispatches = 0;
     let totalSteps = 0;
     let lastStatus = 0;
-    //const startedAt = performance.now();
-    //const label = ctx.isSoftware ? `${ctx.adapterLabel} (software)` : ctx.adapterLabel;
-    //onStatus?.({ backend: 'gpu', message: `GPU solver started on ${label} with ${ctx.chainCount} parallel chains.` });
+    const startedAt = performance.now();
+    const label = ctx.isSoftware ? `${ctx.adapterLabel} (software)` : ctx.adapterLabel;
+    onStatus?.({ backend: 'gpu', message: `GPU solver started on ${label} with ${ctx.chainCount} parallel chains.` });
 
     let failure: string | null = null;
     try {
@@ -1142,8 +1143,8 @@ export const runGpuEngine: EngineRunner = async (
             const now = performance.now();
             if (now - lastStatus > 1000) {
                 lastStatus = now;
-                //const rate = totalSteps / ((now - startedAt) / 1000);
-                //onStatus?.({ backend: 'gpu', message: `GPU solver on ${label}: ${ctx.chainCount} chains, ${(rate / 1e6).toFixed(2)}M search steps/s.` });
+                const rate = totalSteps / ((now - startedAt) / 1000);
+                onStatus?.({ backend: 'gpu', message: `GPU solver on ${label}: ${ctx.chainCount} chains, ${(rate / 1e6).toFixed(2)}M search steps/s.` });
             }
             await new Promise(resolve => setTimeout(resolve, 0));
         }
@@ -1159,5 +1160,5 @@ export const runGpuEngine: EngineRunner = async (
         await fallback(failure, bestBoards);
         return;
     }
-    //onStatus?.({ backend: 'gpu', message: `GPU solver stopped (${label}, ${totalSteps.toLocaleString()} search steps).` });
+    onStatus?.({ backend: 'gpu', message: `GPU solver stopped (${label}, ${totalSteps.toLocaleString()} search steps).` });
 };

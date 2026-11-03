@@ -23,7 +23,7 @@ import {
 } from './utils';
 import {useOptimizer, runOptimizationEngine} from './hooks/useOptimizer';
 import {runGpuEngine} from './hooks/gpuSolver';
-import type {SolverStatus} from './hooks/gpuSolver';
+//import type {SolverStatus} from './hooks/gpuSolver';
 import MiniShape from './components/MiniShape';
 import SaveFileImporter from './components/SaveFileImporter';
 
@@ -1132,12 +1132,12 @@ export default function ModuleInventoryUI() {
         localStorage.setItem('optimizer_solver_mode', solverMode);
     }, [solverMode]);
 
-    const [solverStatus, setSolverStatus] = useState<SolverStatus | null>(null);
+    //const [solverStatus, setSolverStatus] = useState<SolverStatus | null>(null);
     const solverModeRef = useRef(solverMode);
     solverModeRef.current = solverMode;
     const runEngine = useCallback((async (machines: any, boards: any, pool: any, full: any, ref: any, onUpdate: any) => {
-        if (solverModeRef.current === 'GPU') return runGpuEngine(machines, boards, pool, full, ref, onUpdate, setSolverStatus);
-        setSolverStatus(null);
+        if (solverModeRef.current === 'GPU') return runGpuEngine(machines, boards, pool, full, ref, onUpdate);
+        //setSolverStatus(null);
         return runOptimizationEngine(machines, boards, pool, full, ref, onUpdate);
     }) as typeof runOptimizationEngine, []);
 
@@ -2106,16 +2106,16 @@ export default function ModuleInventoryUI() {
                             </button>
                         ))}
                     </div>
-                    {solverMode === 'GPU' && solverStatus && (
-                        <span style={{
-                            fontSize: '0.75em',
-                            color: solverStatus.fallback ? '#ff9800' : '#4caf50',
-                            maxWidth: '340px',
-                            textAlign: 'center'
-                        }}>
-                            {solverStatus.message}
-                        </span>
-                    )}
+                    {/*{solverMode === 'GPU' && solverStatus && (*/}
+                    {/*    <span style={{*/}
+                    {/*        fontSize: '0.75em',*/}
+                    {/*        color: solverStatus.fallback ? '#ff9800' : '#4caf50',*/}
+                    {/*        maxWidth: '340px',*/}
+                    {/*        textAlign: 'center'*/}
+                    {/*    }}>*/}
+                    {/*        {solverStatus.message}*/}
+                    {/*    </span>*/}
+                    {/*)}*/}
                 </div>
                 <button
                     onClick={handleRunAll}
