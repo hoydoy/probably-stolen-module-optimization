@@ -1092,8 +1092,8 @@ export const runGpuEngine: EngineRunner = async (
     let dispatches = 0;
     let totalSteps = 0;
     let lastStatus = 0;
-    const startedAt = performance.now();
-    const label = ctx.isSoftware ? `${ctx.adapterLabel} (software)` : ctx.adapterLabel;
+    //const startedAt = performance.now();
+    //const label = ctx.isSoftware ? `${ctx.adapterLabel} (software)` : ctx.adapterLabel;
     //onStatus?.({ backend: 'gpu', message: `GPU solver started on ${label} with ${ctx.chainCount} parallel chains.` });
 
     let failure: string | null = null;
@@ -1142,7 +1142,7 @@ export const runGpuEngine: EngineRunner = async (
             const now = performance.now();
             if (now - lastStatus > 1000) {
                 lastStatus = now;
-                const rate = totalSteps / ((now - startedAt) / 1000);
+                //const rate = totalSteps / ((now - startedAt) / 1000);
                 //onStatus?.({ backend: 'gpu', message: `GPU solver on ${label}: ${ctx.chainCount} chains, ${(rate / 1e6).toFixed(2)}M search steps/s.` });
             }
             await new Promise(resolve => setTimeout(resolve, 0));
