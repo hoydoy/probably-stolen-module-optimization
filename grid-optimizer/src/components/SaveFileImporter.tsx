@@ -12,52 +12,6 @@ interface SaveFileImporterProps {
     }[]) => void;
 }
 
-// Item names are stored in the save in the language the item was created in,
-// so map the language-independent item identifier to its English in-game name.
-const IDENTIFIER_NAMES: Record<string, string> = {
-    system_module_performance: 'Performance Module',
-    system_module_quality: 'Quality Module',
-    system_module_efficiancy: 'Efficiency Module',
-    system_module_overclock: 'Overclock Module',
-    system_module_fineness: 'Refinement Module',
-    system_module_eco: 'Eco Module',
-    node_small: 'Node (Small)',
-    node_medium: 'Node (Medium)',
-    system_uncapped_neural_core: 'Neural Core Module (Uncapped)',
-    system_capped_neural_core: 'Neural Core Module (Capped)',
-    alarm_module_transmitter: 'Alarm Transmitter Module',
-    furnace_module_junk: 'Furnace Module (Junk Processing)',
-    furnace_module_blast: 'Furnace Module (Blast)',
-    evaporator_module_solvent_recovery: 'Evaporator Solvent Recovery Module',
-    farm_module_dream_cap: 'Dream Cap Neutralizer Hydroponic Module',
-    farm_module_nightmare_cap: 'Dream Cap Nightmare Hydroponic Module',
-    farm_module_smuggler: 'Hydroponic Smuggler Module',
-    farm_module_kotton_loom: 'Kotton Auto Loom Hydroponic Module',
-    farm_module_fillerweed_production: 'Fillerweed Production Hydroponic Module',
-    farm_module_hydroreed_filter: 'Hydroreed Filter Hydroponic Module',
-    farm_module_nutrifruit: 'Nutrifruit Hydroponic Module',
-    dna_module_negative_filter: 'Negative Trait Filter Module',
-    dna_module_positive_filter: 'Positive Trait Filter Module',
-    dna_module_precision: 'Precision Extraction Module',
-    dna_module_stabilizer: 'Genetic Stabilizer Module',
-    printer_module_cnc: 'Computer Numerical Control Module',
-    printer_module_melee_batch: 'Melee Batch Module',
-    printer_module_metal: 'Metal Printer Module',
-    chem_module: 'Chemical Equipment Module',
-    water_purifier: 'Water Purifier',
-    furnace: 'Furnace',
-    moisture_farm: 'Moisture Farm',
-    security_alarm: 'Alarm System',
-    age_well: 'AgeWell',
-    desequencer: 'Cryptographic Desequencer',
-    mirage_projector: 'Mirage Projector',
-    evaporator: 'Evaporator',
-    hydroponic: 'Hydroponic System',
-    '3d_printer': '3D Printer',
-    dna_manipulator: 'DNA Manipulator',
-    save_bag: 'Save Bag',
-};
-
 export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -144,11 +98,6 @@ export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
                 const invStr = JSON.parse(text.substring(quoteStart, quoteEnd + 1));
                 const invData = JSON.parse(invStr);
                 const saveItems = invData.saveItems || [];
-                saveItems.forEach((item: { identifier?: string, name?: string }) => {
-                    if (item.identifier && Object.hasOwn(IDENTIFIER_NAMES, item.identifier)) {
-                        item.name = IDENTIFIER_NAMES[item.identifier];
-                    }
-                });
                 const itemMap = new Map();
                 saveItems.forEach((item: any) => itemMap.set(item.uuid, item));
                 const parentMap = new Map();
