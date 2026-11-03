@@ -207,7 +207,7 @@ export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
                         color = 'Blue';
                     } else if (nameLower.includes('melee batch')) {
                         color = 'Gold';
-                    } else if (nameLower.includes('filterweed')) {
+                    } else if (nameLower.includes('fillerweed')) {
                         color = 'Brown';
                     } else if (nameLower.includes('hydroreed') || nameLower.includes('kotton auto loom') || nameLower.includes('computer numerical')) {
                         color = 'DarkGreen';

@@ -236,7 +236,7 @@ MODULE_TEMPLATES.push({
     size: 4,
     tier: 'Special',
     shapeType: 'Line',
-    displayName: 'Filterweed Production Hydroponic Module',
+    displayName: 'Fillerweed Production Hydroponic Module',
     group: 'Special',
     allowedMachines: ['Hydroponic System']
 });

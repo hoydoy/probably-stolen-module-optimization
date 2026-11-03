@@ -37,7 +37,7 @@ const SPECIAL_MODULE_IDS: string[] = [
     'Positive Trait Filter Module',
     'Precision Extraction Module',
     'Genetic Stabilizer Module',
-    'Filterweed Production Hydroponic Module',
+    'Fillerweed Production Hydroponic Module',
     'Hydroreed Filter Hydroponic Module',
     'Nutrifruit Hydroponic Module',
     'Computer Numerical Control Module',
@@ -757,7 +757,7 @@ export const isSpecialModule = (item: InventoryItem) =>
     || item.displayName.includes('Positive Trait Filter Module')
     || item.displayName.includes('Precision Extraction Module')
     || item.displayName.includes('Genetic Stabilizer Module')
-    || item.displayName.includes('Filterweed Production')
+    || item.displayName.includes('Fillerweed Production')
     || item.displayName.includes('Hydroreed Filter')
     || item.displayName.includes('Nutrifruit Hydroponic Module')
     || item.displayName.includes('Computer Numerical Control Module')

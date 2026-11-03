@@ -50,7 +50,7 @@ export const getBaseStats = (template: { shape: ModuleShape, color: ModuleColor,
     if (displayName.includes('Positive Trait Filter Module')) return {Performance: 0, Quality: 0, Efficiency: -25};
     if (displayName.includes('Precision Extraction Module')) return {Performance: -75, Quality: 0, Efficiency: -75};
     if (displayName.includes('Genetic Stabilizer Module')) return {Performance: -50, Quality: 0, Efficiency: -25};
-    if (displayName.includes('Filterweed Production Hydroponic Module')) return {
+    if (displayName.includes('Fillerweed Production Hydroponic Module')) return {
         Performance: 0,
         Quality: 0,
         Efficiency: -25
