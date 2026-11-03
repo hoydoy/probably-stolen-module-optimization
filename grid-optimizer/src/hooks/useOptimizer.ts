@@ -37,7 +37,7 @@ const SPECIAL_MODULE_IDS: string[] = [
     'Positive Trait Filter Module',
     'Precision Extraction Module',
     'Genetic Stabilizer Module',
-    'Fillerweed Production Hydroponic Module',
+    'Filterweed Production Hydroponic Module',
     'Hydroreed Filter Hydroponic Module',
     'Nutrifruit Hydroponic Module',
     'Computer Numerical Control Module',
@@ -131,7 +131,7 @@ class BitReader {
     }
 }
 
-const countEffect = (item: InventoryItem, effect: ItemEffect) => {
+export const countEffect = (item: InventoryItem, effect: ItemEffect) => {
     let n = 0;
     if (item.effects[0] === effect) n++;
     if (item.effects[1] === effect) n++;
@@ -140,7 +140,7 @@ const countEffect = (item: InventoryItem, effect: ItemEffect) => {
 
 export const MAX_ENCODABLE_MODULES = 255;
 
-const generateCodeFromState = (
+export const generateCodeFromState = (
     currentTier: GridTier,
     maxStats: { Performance: boolean, Quality: boolean, Efficiency: boolean },
     tarStats: TargetStats,
@@ -739,7 +739,7 @@ export type MachineConfig = {
     machineType?: string;
 };
 
-const STAT_KEYS: (keyof Stats)[] = ['Performance', 'Quality', 'Efficiency'];
+export const STAT_KEYS: (keyof Stats)[] = ['Performance', 'Quality', 'Efficiency'];
 
 export const isLumpyModule = (item: InventoryItem) => item.displayName.includes('Neural Core');
 
@@ -757,7 +757,7 @@ export const isSpecialModule = (item: InventoryItem) =>
     || item.displayName.includes('Positive Trait Filter Module')
     || item.displayName.includes('Precision Extraction Module')
     || item.displayName.includes('Genetic Stabilizer Module')
-    || item.displayName.includes('Fillerweed Production')
+    || item.displayName.includes('Filterweed Production')
     || item.displayName.includes('Hydroreed Filter')
     || item.displayName.includes('Nutrifruit Hydroponic Module')
     || item.displayName.includes('Computer Numerical Control Module')
@@ -765,16 +765,16 @@ export const isSpecialModule = (item: InventoryItem) =>
     || item.displayName.includes('Metal Printer Module')
     || item.displayName.includes('Glitched Module');
 
-const statIsIgnored = (m: MachineConfig, key: keyof Stats) => Boolean(m.ignoreStats?.[key]);
+export const statIsIgnored = (m: MachineConfig, key: keyof Stats) => Boolean(m.ignoreStats?.[key]);
 const DEFAULT_STAT_PRIORITY = 1;
-const priorityOf = (m: MachineConfig, key: keyof Stats) =>
+export const priorityOf = (m: MachineConfig, key: keyof Stats) =>
     m.statPriority?.[key] ?? DEFAULT_STAT_PRIORITY;
 
-const PRIORITY_WEIGHT_STEP = 4;
+export const PRIORITY_WEIGHT_STEP = 4;
 const DRAW_TOURNAMENT = 4;
 const TARGET_MET_DRAW_SCALE = 0.25;
 const RESTART_AFTER_STAGNATIONS = 8;
-const BALANCE_PENALTY_WEIGHT = 14;
+export const BALANCE_PENALTY_WEIGHT = 14;
 const PAIR_REBUILD_PROBABILITY = 0.35;
 const SPECIAL_RELOCATE_PROBABILITY = 0.6;
 const SPECIAL_EXPLORE_PROBABILITY = 0.25;
@@ -785,11 +785,11 @@ const compareTiers = (a: Float64Array, b: Float64Array) => {
     }
     return 0;
 };
-const statIsScored = (m: MachineConfig, key: keyof Stats) =>
+export const statIsScored = (m: MachineConfig, key: keyof Stats) =>
     !statIsIgnored(m, key) && (Boolean(m.maximizeStats?.[key]) || m.targetStats[key] !== null);
 
 const PLACEMENT_DEPENDENT_EFFECTS: ItemEffect[] = ['Side Mount', 'Top Mount', 'Receiver', 'Negative Feedback'];
-const MAX_PIECES_PER_BOARD = 18;
+export const MAX_PIECES_PER_BOARD = 18;
 
 const dominates = (a: number[], b: number[]) => {
     let strictlyBetter = false;
@@ -908,6 +908,152 @@ const createYielder = () => {
     };
 };
 
+export const countAdjacentNodes = (board: (InventoryItem | 'Locked' | null)[][], id: string) => {
+    const rows = board.length;
+    const cols = board[0]?.length || 7;
+    const nodeIds = new Set<string>();
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const cell = board[y][x];
+            if (!cell || cell === 'Locked' || cell.id !== id) continue;
+            for (let d = 0; d < 4; d++) {
+                const nx = x + NEIGHBOR_DX[d];
+                const ny = y + NEIGHBOR_DY[d];
+                if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+                const adj = board[ny][nx];
+                if (adj && adj !== 'Locked' && adj.color === 'White') nodeIds.add(adj.id);
+            }
+        }
+    }
+    return nodeIds.size;
+};
+
+export interface Objective {
+    tierCount: number;
+    tierOf: (m: MachineConfig, key: keyof Stats) => number;
+    lumpyIds: string[];
+}
+
+export const createObjective = (machines: MachineConfig[], fullInventory: InventoryItem[]): Objective => {
+    const activeRanks = new Set<number>();
+    for (const m of machines) {
+        for (const key of STAT_KEYS) {
+            if (!statIsIgnored(m, key)) activeRanks.add(priorityOf(m, key));
+        }
+    }
+    if (activeRanks.size === 0) activeRanks.add(DEFAULT_STAT_PRIORITY);
+    const rankOrder = [...activeRanks].sort((a, b) => a - b);
+    const tierOfRank = new Map<number, number>(rankOrder.map((r, i) => [r, i]));
+    return {
+        tierCount: rankOrder.length,
+        tierOf: (m: MachineConfig, key: keyof Stats) => tierOfRank.get(priorityOf(m, key))!,
+        lumpyIds: fullInventory.filter(isLumpyModule).map(item => item.id)
+    };
+};
+
+export const computeTiers = (
+    out: Float64Array,
+    machines: MachineConfig[],
+    objective: Objective,
+    statsFor: (mIdx: number) => ReturnType<typeof calculateBoardStats>,
+    boardFor: (mIdx: number) => (InventoryItem | 'Locked' | null)[][]
+) => {
+    const {tierCount, tierOf, lumpyIds} = objective;
+    const machineCount = machines.length;
+    out.fill(0);
+    let totalPiecesPlaced = 0;
+
+    for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+        const stats = statsFor(mIdx);
+        totalPiecesPlaced += stats.placedPiecesCount;
+
+        const m = machines[mIdx];
+        const t = stats.totals;
+
+        for (const key of STAT_KEYS) {
+            if (statIsIgnored(m, key)) continue;
+
+            const ti = tierOf(m, key);
+            const target = m.targetStats[key];
+            if (target !== null && t[key] < target) out[ti] -= (target - t[key]) * 10000;
+            if (m.maximizeStats[key]) out[ti] += (t[key] * 10);
+        }
+    }
+
+    out[tierCount] -= totalPiecesPlaced * 5;
+
+    if (machineCount > 1) {
+        const balanceVals: Stats[] = [];
+        for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+            const stats = statsFor(mIdx);
+            const board = boardFor(mIdx);
+            const vals: Stats = {
+                Performance: stats.totals.Performance,
+                Quality: stats.totals.Quality,
+                Efficiency: stats.totals.Efficiency
+            };
+            for (const id of lumpyIds) {
+                const own = stats.pieceStats.get(id);
+                if (own === undefined) continue;
+                const factor = 1 + 0.2 * countAdjacentNodes(board, id);
+                vals.Performance -= own.Performance * factor;
+                vals.Quality -= own.Quality * factor;
+                vals.Efficiency -= own.Efficiency * factor;
+            }
+            balanceVals.push(vals);
+        }
+
+        for (const statKey of STAT_KEYS) {
+            const isBalanced = (mIdx: number) => {
+                const m = machines[mIdx];
+                return !statIsIgnored(m, statKey) && m.maximizeStats[statKey] && m.targetStats[statKey] === null;
+            };
+
+            for (let tier = 0; tier < tierCount; tier++) {
+                let sum = 0, count = 0;
+                for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+                    if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
+                    sum += balanceVals[mIdx][statKey];
+                    count++;
+                }
+                if (count > 1) {
+                    const avg = sum / count;
+                    let mad = 0;
+                    for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+                        if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
+                        mad += Math.abs(balanceVals[mIdx][statKey] - avg);
+                    }
+                    out[tier] -= (mad / count) * BALANCE_PENALTY_WEIGHT;
+                }
+            }
+        }
+    }
+};
+
+export const buildIneligibleFlags = (
+    machines: MachineConfig[],
+    searchPool: InventoryItem[],
+    internalOf: (index: number) => Stats,
+    boards: (InventoryItem | 'Locked' | null)[][][]
+) => machines.map((m, mIdx) => {
+    const flags = new Uint8Array(searchPool.length);
+    const board = boards[mIdx];
+    const isSmallGrid = board.length === EVAPORATOR_GRID_SIZE.rows && (board[0]?.length ?? 0) === EVAPORATOR_GRID_SIZE.cols;
+    for (let i = 0; i < searchPool.length; i++) {
+        if (!isLumpyModule(searchPool[i])) continue;
+        const s = internalOf(i);
+        let usedValue = 0;
+        let wastedValue = 0;
+        for (const key of STAT_KEYS) {
+            if (s[key] <= 0) continue;
+            if (!statIsIgnored(m, key) && (m.maximizeStats[key] || m.targetStats[key] !== null)) usedValue += s[key];
+            else wastedValue += s[key];
+        }
+        if (isSmallGrid || wastedValue > usedValue) flags[i] = 1;
+    }
+    return flags;
+});
+
 const FRAME_BUDGET_MS = 12;
 const TIMER_YIELD_INTERVAL_MS = 32;
 
@@ -943,17 +1089,8 @@ export const runOptimizationEngine = async (
     const poolShapeCount = new Set(searchPool.map(item => item.shape)).size;
     const inventoryById = indexInventoryById(fullInventory);
 
-    const activeRanks = new Set<number>();
-    for (const m of machines) {
-        for (const key of STAT_KEYS) {
-            if (!statIsIgnored(m, key)) activeRanks.add(priorityOf(m, key));
-        }
-    }
-    if (activeRanks.size === 0) activeRanks.add(DEFAULT_STAT_PRIORITY);
-    const rankOrder = [...activeRanks].sort((a, b) => a - b);
-    const tierCount = rankOrder.length;
-    const tierOfRank = new Map<number, number>(rankOrder.map((r, i) => [r, i]));
-    const tierOf = (m: MachineConfig, key: keyof Stats) => tierOfRank.get(priorityOf(m, key))!;
+    const objective = createObjective(machines, fullInventory);
+    const {tierCount, tierOf} = objective;
 
     const currentTiers = new Float64Array(tierCount + 1);
     const epochTiers = new Float64Array(tierCount + 1).fill(-Infinity);
@@ -1039,47 +1176,7 @@ export const runOptimizationEngine = async (
         return tables;
     });
 
-    const isIneligible = machines.map((m, mIdx) => {
-        const flags = new Uint8Array(searchPool.length);
-        const board = currentBoards[mIdx];
-        const isSmallGrid = board.length === EVAPORATOR_GRID_SIZE.rows && (board[0]?.length ?? 0) === EVAPORATOR_GRID_SIZE.cols;
-        for (let i = 0; i < searchPool.length; i++) {
-            if (!isLumpyModule(searchPool[i])) continue;
-            const s = ctxByIndex[i].internal;
-            let usedValue = 0;
-            let wastedValue = 0;
-            for (const key of STAT_KEYS) {
-                if (s[key] <= 0) continue;
-                if (!statIsIgnored(m, key) && (m.maximizeStats[key] || m.targetStats[key] !== null)) usedValue += s[key];
-                else wastedValue += s[key];
-            }
-            if (isSmallGrid || wastedValue > usedValue) flags[i] = 1;
-        }
-        return flags;
-    });
-
-    const lumpyIds = fullInventory.filter(isLumpyModule).map(item => item.id);
-    const balanceVals: Stats[] = machines.map(() => ({Performance: 0, Quality: 0, Efficiency: 0}));
-
-    const countAdjacentNodes = (board: (InventoryItem | 'Locked' | null)[][], id: string) => {
-        const rows = board.length;
-        const cols = board[0]?.length || 7;
-        const nodeIds = new Set<string>();
-        for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-                const cell = board[y][x];
-                if (!cell || cell === 'Locked' || cell.id !== id) continue;
-                for (let d = 0; d < 4; d++) {
-                    const nx = x + NEIGHBOR_DX[d];
-                    const ny = y + NEIGHBOR_DY[d];
-                    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
-                    const adj = board[ny][nx];
-                    if (adj && adj !== 'Locked' && adj.color === 'White') nodeIds.add(adj.id);
-                }
-            }
-        }
-        return nodeIds.size;
-    };
+    const isIneligible = buildIneligibleFlags(machines, searchPool, i => ctxByIndex[i].internal, currentBoards);
 
     const placedMark = new Int32Array(searchPool.length);
     const consumedMark = new Int32Array(searchPool.length);
@@ -1563,71 +1660,7 @@ export const runOptimizationEngine = async (
             const statsFor = (mIdx: number) =>
                 isRebuilt[mIdx] ? rebuiltStats[mIdx]! : currentStats[mIdx];
 
-            currentTiers.fill(0);
-            let totalPiecesPlaced = 0;
-
-            for (let mIdx = 0; mIdx < machineCount; mIdx++) {
-                const stats = statsFor(mIdx);
-                totalPiecesPlaced += stats.placedPiecesCount;
-
-                const m = machines[mIdx];
-                const t = stats.totals;
-
-                for (const key of STAT_KEYS) {
-                    if (statIsIgnored(m, key)) continue;
-
-                    const ti = tierOf(m, key);
-                    const target = m.targetStats[key];
-                    if (target !== null && t[key] < target) currentTiers[ti] -= (target - t[key]) * 10000;
-                    if (m.maximizeStats[key]) currentTiers[ti] += (t[key] * 10);
-                }
-            }
-
-            currentTiers[tierCount] -= totalPiecesPlaced * 5;
-
-            if (machineCount > 1) {
-                for (let mIdx = 0; mIdx < machineCount; mIdx++) {
-                    const stats = statsFor(mIdx);
-                    const board = isRebuilt[mIdx] ? testBoards[mIdx] : currentBoards[mIdx];
-                    const vals = balanceVals[mIdx];
-                    vals.Performance = stats.totals.Performance;
-                    vals.Quality = stats.totals.Quality;
-                    vals.Efficiency = stats.totals.Efficiency;
-                    for (const id of lumpyIds) {
-                        const own = stats.pieceStats.get(id);
-                        if (own === undefined) continue;
-                        const factor = 1 + 0.2 * countAdjacentNodes(board, id);
-                        vals.Performance -= own.Performance * factor;
-                        vals.Quality -= own.Quality * factor;
-                        vals.Efficiency -= own.Efficiency * factor;
-                    }
-                }
-
-                for (const statKey of STAT_KEYS) {
-                    const isBalanced = (mIdx: number) => {
-                        const m = machines[mIdx];
-                        return !statIsIgnored(m, statKey) && m.maximizeStats[statKey] && m.targetStats[statKey] === null;
-                    };
-
-                    for (let tier = 0; tier < tierCount; tier++) {
-                        let sum = 0, count = 0;
-                        for (let mIdx = 0; mIdx < machineCount; mIdx++) {
-                            if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
-                            sum += balanceVals[mIdx][statKey];
-                            count++;
-                        }
-                        if (count > 1) {
-                            const avg = sum / count;
-                            let mad = 0;
-                            for (let mIdx = 0; mIdx < machineCount; mIdx++) {
-                                if (!isBalanced(mIdx) || tierOf(machines[mIdx], statKey) !== tier) continue;
-                                mad += Math.abs(balanceVals[mIdx][statKey] - avg);
-                            }
-                            currentTiers[tier] -= (mad / count) * BALANCE_PENALTY_WEIGHT;
-                        }
-                    }
-                }
-            }
+            computeTiers(currentTiers, machines, objective, statsFor, mIdx => isRebuilt[mIdx] ? testBoards[mIdx] : currentBoards[mIdx]);
 
             if (!isSolvingRef.current) break;
 
@@ -1691,7 +1724,8 @@ export function useOptimizer(
     machineId: string,
     getUsedItems: (excludeId: string) => Set<string>,
     defaultTier: GridTier = 3,
-    isExternallySolving: boolean = false
+    isExternallySolving: boolean = false,
+    runEngine: typeof runOptimizationEngine = runOptimizationEngine
 ) {
     const getSavedType = () => localStorage.getItem(`optimizer_machine_type_${machineId}`) || '';
     const [machineType, setMachineType] = useState(getSavedType);
@@ -2130,7 +2164,7 @@ export function useOptimizer(
 
         const config = {id: machineId, tier, targetStats, maximizeStats, ignoreStats, statPriority, machineType};
 
-        await runOptimizationEngine([config], [boardRef.current], engineInventory, fullInventoryForMachine, isSolvingRef, (updates) => {
+        await runEngine([config], [boardRef.current], engineInventory, fullInventoryForMachine, isSolvingRef, (updates) => {
             const myUpdate = updates.get(machineId);
             if (myUpdate) {
                 setBoardSync(myUpdate.board);

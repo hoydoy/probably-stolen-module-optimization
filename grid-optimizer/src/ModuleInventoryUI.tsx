@@ -18,9 +18,12 @@ import {
     PRECOMPUTED_OFFSETS,
     isFixedStatModule,
     getModuleTemplate,
-    compareTemplatesByMachine
+    compareTemplatesByMachine,
+    getMachineTypeName
 } from './utils';
 import {useOptimizer, runOptimizationEngine} from './hooks/useOptimizer';
+import {runGpuEngine} from './hooks/gpuSolver';
+import type {SolverStatus} from './hooks/gpuSolver';
 import MiniShape from './components/MiniShape';
 import SaveFileImporter from './components/SaveFileImporter';
 
@@ -295,9 +298,10 @@ const MachineInstance = React.memo(forwardRef(({
                                                    isThisMachineSolving,
                                                    isGlobalSolving,
                                                    onStopGlobal,
+                                                   runEngine,
                                                    canDelete
                                                }: any, ref) => {
-    const optimizer = useOptimizer(inventory, setInventory, machineId, getUsedItems, 3, isAnySolving);
+    const optimizer = useOptimizer(inventory, setInventory, machineId, getUsedItems, 3, isAnySolving, runEngine);
     const [localHover, setLocalHover] = useState<{ x: number, y: number } | null>(null);
     const [showPaths, setShowPaths] = useState(false);
 
@@ -738,7 +742,7 @@ const MachineInstance = React.memo(forwardRef(({
                         }}
                     >
                         <option value="Select Machine..." disabled>Select Machine...</option>
-                        {machineType !== "Select Machine..." && !["Moisture Farm", "Furnace", "Water Purifier", "Alarm System", "AgeWell", "Cryptographic Desequencer", "Mirage Projector", "Evaporator", "Hydroponic System", "3D Printer", "DNA Manipulator"].includes(machineType) && (
+                        {machineType !== "Select Machine..." && !["Moisture Farm", "Furnace", "Water Purifier", "Alarm System", "AgeWell", "Cryptographic Desequencer", "Mirage Projector", "Evaporator", "Old Hydroponic System", "Printer", "DNA Manipulator"].includes(machineType) && (
                             <option value={machineType}>
                                 {machineType.length > 45 ? '...' + machineType.substring(machineType.length - 42) : machineType}
                             </option>
@@ -751,8 +755,8 @@ const MachineInstance = React.memo(forwardRef(({
                         <option value="Cryptographic Desequencer">Cryptographic Desequencer</option>
                         <option value="Mirage Projector">Mirage Projector</option>
                         <option value="Evaporator">Evaporator</option>
-                        <option value="Hydroponic System">Hydroponic System</option>
-                        <option value="3D Printer">3D Printer</option>
+                        <option value="Old Hydroponic System">Old Hydroponic System</option>
+                        <option value="Printer">Printer</option>
                         <option value="DNA Manipulator">DNA Manipulator</option>
                     </select>
 
@@ -1128,6 +1132,15 @@ export default function ModuleInventoryUI() {
         localStorage.setItem('optimizer_solver_mode', solverMode);
     }, [solverMode]);
 
+    const [solverStatus, setSolverStatus] = useState<SolverStatus | null>(null);
+    const solverModeRef = useRef(solverMode);
+    solverModeRef.current = solverMode;
+    const runEngine = useCallback((async (machines: any, boards: any, pool: any, full: any, ref: any, onUpdate: any) => {
+        if (solverModeRef.current === 'GPU') return runGpuEngine(machines, boards, pool, full, ref, onUpdate, setSolverStatus);
+        setSolverStatus(null);
+        return runOptimizationEngine(machines, boards, pool, full, ref, onUpdate);
+    }) as typeof runOptimizationEngine, []);
+
     const [inventory, setInventory] = useState<InventoryItem[]>(() => {
         const savedInventory = localStorage.getItem('optimizer_inventory');
         if (savedInventory) {
@@ -1473,7 +1486,7 @@ export default function ModuleInventoryUI() {
         const clampedValue = Math.max(minLimit, Math.min(maxLimit, val));
 
         setInventory(prev => prev.map(invItem => {
-            if (invItem.id === item.id) {
+            if (invItem.id === invItem.id) {
                 const updatedValues: [number, number] = [...invItem.effectValues] as [number, number];
                 updatedValues[effectIndex] = clampedValue;
                 return {...invItem, effectValues: updatedValues};
@@ -1587,6 +1600,9 @@ export default function ModuleInventoryUI() {
         ));
     };
 
+    const machinesStateRef = useRef<{ id: string }[]>([]);
+    machinesStateRef.current = machines;
+
     const handleImportSave = useCallback((newItems: InventoryItem[], newMachines: {
         id: string,
         boardIds: (string | null)[][],
@@ -1595,8 +1611,37 @@ export default function ModuleInventoryUI() {
     }[]) => {
         setInventory(newItems);
 
-        newMachines.forEach(m => {
-            localStorage.setItem(`optimizer_machine_${m.id}`, JSON.stringify({boardIds: m.boardIds, tier: m.tier}));
+        const typeKey = (label: string) => getMachineTypeName(label).replace(/\s*\d+$/, '').toLowerCase();
+        const previous = machinesStateRef.current.map(m => {
+            try {
+                const saved = JSON.parse(localStorage.getItem(`optimizer_machine_${m.id}`) || 'null');
+                return saved ? {
+                    type: typeKey(localStorage.getItem(`optimizer_machine_type_${m.id}`) || ''),
+                    saved,
+                    used: false
+                } : null;
+            } catch {
+                return null;
+            }
+        });
+
+        newMachines.forEach((m, index) => {
+            let source = previous.find(p => p && !p.used && p.type !== '' && p.type === typeKey(m.machineType)) ?? null;
+            if (!source && previous[index] && !previous[index]!.used) source = previous[index];
+            if (source) source.used = true;
+            const settings = source
+                ? {
+                    maximizeStats: source.saved.maximizeStats,
+                    targetStats: source.saved.targetStats,
+                    ignoreStats: source.saved.ignoreStats,
+                    statPriority: source.saved.statPriority
+                }
+                : {};
+            localStorage.setItem(`optimizer_machine_${m.id}`, JSON.stringify({
+                ...settings,
+                boardIds: m.boardIds,
+                tier: m.tier
+            }));
             localStorage.setItem(`optimizer_machine_type_${m.id}`, m.machineType);
         });
 
@@ -1664,7 +1709,7 @@ export default function ModuleInventoryUI() {
         setIsGlobalSolving(true);
         participants.forEach(p => handleSolvingChange(p.id, true));
         try {
-            await runOptimizationEngine(
+            await runEngine(
                 configs,
                 participants.map(p => p.handle.getBoard()),
                 engineInventory,
@@ -1978,38 +2023,6 @@ export default function ModuleInventoryUI() {
             )}
 
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
-                <div style={{display: 'flex', gap: '6px', alignItems: 'center'}}>
-                    <span style={{fontSize: '0.85em', color: '#aaa', fontWeight: 'bold'}}>Solver Engine:</span>
-                    <button
-                        onClick={() => setSolverMode('CPU')}
-                        style={{
-                            padding: '4px 8px',
-                            fontSize: '0.8em',
-                            borderRadius: '4px',
-                            border: '1px solid #555',
-                            backgroundColor: solverMode === 'CPU' ? '#4caf50' : '#222',
-                            color: 'white',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        CPU
-                    </button>
-                    <button
-                        onClick={() => setSolverMode('GPU')}
-                        style={{
-                            padding: '4px 8px',
-                            fontSize: '0.8em',
-                            borderRadius: '4px',
-                            border: '1px solid #555',
-                            backgroundColor: solverMode === 'GPU' ? '#4caf50' : '#222',
-                            color: 'white',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        GPU
-                    </button>
-                </div>
-
                 <div style={{color: '#888', fontSize: '0.85em', textAlign: 'center', flex: 1}}>
                     Tip: While dragging a module, press Q, E, or F to rotate or flip.
                 </div>
@@ -2055,6 +2068,7 @@ export default function ModuleInventoryUI() {
                         isThisMachineSolving={solvingStates[m.id] || false}
                         isGlobalSolving={isGlobalSolving}
                         onStopGlobal={handleStopGlobal}
+                        runEngine={runEngine}
                         canDelete={machines.length > 1}
                     />
                 ))}
@@ -2064,10 +2078,45 @@ export default function ModuleInventoryUI() {
                 display: 'flex',
                 gap: '15px',
                 justifyContent: 'center',
+                alignItems: 'center',
                 marginTop: '30px',
                 width: '100%',
                 flexWrap: 'wrap'
             }}>
+                <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'}}>
+                    <div style={{display: 'flex', gap: '6px', alignItems: 'center'}}>
+                        <span style={{fontSize: '0.85em', color: '#aaa', fontWeight: 'bold'}}>Solver:</span>
+                        {(['CPU', 'GPU'] as const).map(mode => (
+                            <button
+                                key={mode}
+                                onClick={() => setSolverMode(mode)}
+                                disabled={isAnySolving}
+                                style={{
+                                    padding: '8px 14px',
+                                    fontSize: '0.9em',
+                                    borderRadius: '4px',
+                                    border: '1px solid #555',
+                                    backgroundColor: solverMode === mode ? '#4caf50' : '#222',
+                                    color: 'white',
+                                    cursor: isAnySolving ? 'not-allowed' : 'pointer',
+                                    opacity: isAnySolving ? 0.6 : 1
+                                }}
+                            >
+                                {mode}
+                            </button>
+                        ))}
+                    </div>
+                    {solverMode === 'GPU' && solverStatus && (
+                        <span style={{
+                            fontSize: '0.75em',
+                            color: solverStatus.fallback ? '#ff9800' : '#4caf50',
+                            maxWidth: '340px',
+                            textAlign: 'center'
+                        }}>
+                            {solverStatus.message}
+                        </span>
+                    )}
+                </div>
                 <button
                     onClick={handleRunAll}
                     disabled={inventory.length === 0 && !isAnySolving}
