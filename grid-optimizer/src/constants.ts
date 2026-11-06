@@ -268,7 +268,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Computer Numerical Control Module',
     group: 'Special',
-    allowedMachines: ['3D Printer']
+    allowedMachines: ['Printer', '3D Printer']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -278,7 +278,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Melee Batch Module',
     group: 'Special',
-    allowedMachines: ['3D Printer']
+    allowedMachines: ['Printer', '3D Printer']
 });
 MODULE_TEMPLATES.push({
     shape: 'Line4',
@@ -288,7 +288,7 @@ MODULE_TEMPLATES.push({
     shapeType: 'Line',
     displayName: 'Metal Printer Module',
     group: 'Special',
-    allowedMachines: ['3D Printer']
+    allowedMachines: ['Printer', '3D Printer']
 });
 MODULE_TEMPLATES.push({
     shape: 'Square4_Base',
