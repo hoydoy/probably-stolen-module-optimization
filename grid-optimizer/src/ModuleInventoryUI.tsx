@@ -742,7 +742,7 @@ const MachineInstance = React.memo(forwardRef(({
                         }}
                     >
                         <option value="Select Machine..." disabled>Select Machine...</option>
-                        {machineType !== "Select Machine..." && !["Moisture Farm", "Furnace", "Water Purifier", "Alarm System", "AgeWell", "Cryptographic Desequencer", "Mirage Projector", "Evaporator", "Old Hydroponic System", "Printer", "DNA Manipulator"].includes(machineType) && (
+                        {machineType !== "Select Machine..." && !["Moisture Farm", "Furnace", "Water Purifier", "Alarm System", "AgeWell", "Cryptographic Desequencer", "Mirage Projector", "Evaporator", "Old Hydroponic System", "3D Printer", "DNA Manipulator"].includes(machineType) && (
                             <option value={machineType}>
                                 {machineType.length > 45 ? '...' + machineType.substring(machineType.length - 42) : machineType}
                             </option>
@@ -756,7 +756,7 @@ const MachineInstance = React.memo(forwardRef(({
                         <option value="Mirage Projector">Mirage Projector</option>
                         <option value="Evaporator">Evaporator</option>
                         <option value="Old Hydroponic System">Old Hydroponic System</option>
-                        <option value="Printer">Printer</option>
+                        <option value="3D Printer">3D Printer</option>
                         <option value="DNA Manipulator">DNA Manipulator</option>
                     </select>
 

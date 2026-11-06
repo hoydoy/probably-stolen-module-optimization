@@ -51,7 +51,7 @@ const IDENTIFIER_NAMES: Record<string, string> = {
     mirage_projector: 'Mirage Projector',
     evaporator: 'Evaporator',
     hydroponic: 'Hydroponic System',
-    '3d_printer': '3D Printer',
+    '3d_printer': 'Printer',
     dna_manipulator: 'DNA Manipulator',
     save_bag: 'Save Bag',
 };
@@ -209,7 +209,7 @@ export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
                         }
                     });
                 });
-                const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm', 'evaporator', 'hydroponic', '3d printer', 'dna'];
+                const machineKeywords = ['purifier', 'furnace', 'farm', 'agewell', 'projector', 'desequencer', 'alarm', 'evaporator', 'hydroponic', 'printer', 'dna'];
                 saveItems.forEach((item: any) => {
                     const nameLower = (item.name || '').toLowerCase();
                     const typesStr = item.itemTypes?.join(' ').toLowerCase() || '';
@@ -436,7 +436,7 @@ export default function SaveFileImporter({onImport}: SaveFileImporterProps) {
                             else if (pName.includes("desequencer")) dropdownName = "Cryptographic Desequencer";
                             else if (pName.includes("evaporator")) dropdownName = "Evaporator";
                             else if (pName.includes("hydroponic")) dropdownName = "Hydroponic System";
-                            else if (pName.includes("3d printer")) dropdownName = "3D Printer";
+                            else if (pName.includes("printer")) dropdownName = "3D Printer";
                             else if (pName.includes("dna")) dropdownName = "DNA Manipulator";
                             else if (pName.includes("alarm") || pName.includes("machine")) dropdownName = "Alarm System";
                         }
