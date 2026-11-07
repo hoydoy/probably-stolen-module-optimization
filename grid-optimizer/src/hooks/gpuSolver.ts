@@ -1,5 +1,5 @@
-import type { InventoryItem, Stats } from '../types';
-import { applyInternalEffects, PRECOMPUTED_ORIENTATIONS } from '../utils';
+import type {InventoryItem, Stats} from '../types';
+import {applyInternalEffects, PRECOMPUTED_ORIENTATIONS} from '../utils';
 import {
     runOptimizationEngine,
     buildSearchPool,
@@ -11,6 +11,7 @@ import {
     indexInventoryById,
     isSpecialModule,
     isLumpyModule,
+    isForcedModule,
     countEffect,
     statIsIgnored,
     statIsScored,
@@ -18,7 +19,7 @@ import {
     PRIORITY_WEIGHT_STEP,
     STAT_KEYS
 } from './useOptimizer';
-import type { MachineConfig, Objective } from './useOptimizer';
+import type {MachineConfig, Objective} from './useOptimizer';
 
 type Board = (InventoryItem | 'Locked' | null)[][];
 
@@ -71,7 +72,7 @@ struct Params {
     poolCount: u32,
     steps: u32,
     seed: u32,
-    mode: u32,
+    forcedCount: u32,
     tMin: f32,
     tMax: f32,
     balanceWeight: f32,
@@ -93,6 +94,8 @@ var<private> rngState: u32;
 var<private> mTot: array<i32, ${MMAX * 3}>;
 var<private> mBal: array<f32, ${MMAX * 3}>;
 var<private> mPieces: array<i32, ${MMAX}>;
+var<private> mForced: array<i32, ${MMAX}>;
+var<private> svForced: array<i32, 2>;
 var<private> cur: array<f32, ${OBJS}>;
 var<private> nw: array<f32, ${OBJS}>;
 var<private> snapA: array<i32, ${CELLS}>;
@@ -241,6 +244,7 @@ fn eval_machine(m: u32) {
     var lumpP: f32 = 0.0;
     var lumpQ: f32 = 0.0;
     var lumpE: f32 = 0.0;
+    var forcedCnt: i32 = 0;
 
     for (var s: u32 = 0u; s < ns; s++) {
         let pid = u32(slotPiece[s]);
@@ -282,6 +286,7 @@ fn eval_machine(m: u32) {
         totP += fp;
         totQ += fq;
         totE += fe;
+        if ((fl & 128) != 0) { forcedCnt++; }
 
         if ((fl & 64) != 0) {
             let factor = 1.0 + 0.2 * f32(adjn);
@@ -298,6 +303,7 @@ fn eval_machine(m: u32) {
     mBal[m * 3u + 1u] = f32(totQ) - lumpQ;
     mBal[m * 3u + 2u] = f32(totE) - lumpE;
     mPieces[m] = i32(ns);
+    mForced[m] = forcedCnt;
 }
 
 fn compute_obj() {
@@ -305,8 +311,10 @@ fn compute_obj() {
     let mc = P.machineCount;
     for (var t: u32 = 0u; t <= tc; t++) { nw[t] = 0.0; }
     var pieces: i32 = 0;
+    var forcedSum: i32 = 0;
     for (var m: u32 = 0u; m < mc; m++) {
         pieces += mPieces[m];
+        forcedSum += mForced[m];
         for (var k: u32 = 0u; k < 3u; k++) {
             let b = 3u + k * 5u;
             if (mi(m, b) != 0) { continue; }
@@ -320,6 +328,7 @@ fn compute_obj() {
         }
     }
     nw[tc] = nw[tc] - f32(pieces) * 5.0;
+    nw[0] = f32(forcedSum);
 
     if (mc > 1u) {
         for (var k: u32 = 0u; k < 3u; k++) {
@@ -421,6 +430,10 @@ fn try_place(p: u32, m: u32) -> bool {
 fn choose_unplaced(m: u32) -> i32 {
     let pc = P.poolCount;
     if (pc == 0u) { return -1; }
+    if (P.forcedCount > 0u && rand_below(3u) == 0u) {
+        let fp = rand_below(P.forcedCount);
+        if (pm[fp] == -1 && ((pinf(fp, 8u) >> m) & 1) != 0) { return i32(fp); }
+    }
     let tournament = rand_below(2u) == 0u;
     var best: i32 = -1;
     var bestV: f32 = -1.0e30;
@@ -461,11 +474,13 @@ fn snapshot(m: u32, which: u32) {
         svTot[0] = mTot[m * 3u]; svTot[1] = mTot[m * 3u + 1u]; svTot[2] = mTot[m * 3u + 2u];
         svBal[0] = mBal[m * 3u]; svBal[1] = mBal[m * 3u + 1u]; svBal[2] = mBal[m * 3u + 2u];
         svPieces[0] = mPieces[m];
+        svForced[0] = mForced[m];
     } else {
         for (var i: u32 = 0u; i < CELLS; i++) { snapB[i] = cells[base + i]; }
         svTot[3] = mTot[m * 3u]; svTot[4] = mTot[m * 3u + 1u]; svTot[5] = mTot[m * 3u + 2u];
         svBal[3] = mBal[m * 3u]; svBal[4] = mBal[m * 3u + 1u]; svBal[5] = mBal[m * 3u + 2u];
         svPieces[1] = mPieces[m];
+        svForced[1] = mForced[m];
     }
 }
 
@@ -476,11 +491,13 @@ fn restore(m: u32, which: u32) {
         mTot[m * 3u] = svTot[0]; mTot[m * 3u + 1u] = svTot[1]; mTot[m * 3u + 2u] = svTot[2];
         mBal[m * 3u] = svBal[0]; mBal[m * 3u + 1u] = svBal[1]; mBal[m * 3u + 2u] = svBal[2];
         mPieces[m] = svPieces[0];
+        mForced[m] = svForced[0];
     } else {
         for (var i: u32 = 0u; i < CELLS; i++) { cells[base + i] = snapB[i]; }
         mTot[m * 3u] = svTot[3]; mTot[m * 3u + 1u] = svTot[4]; mTot[m * 3u + 2u] = svTot[5];
         mBal[m * 3u] = svBal[3]; mBal[m * 3u + 1u] = svBal[4]; mBal[m * 3u + 2u] = svBal[5];
         mPieces[m] = svPieces[1];
+        mForced[m] = svForced[1];
     }
 }
 
@@ -623,6 +640,7 @@ export interface GpuProblem {
     initialBoards: Board[];
     pieces: PieceEntry[];
     poolCount: number;
+    forcedCount: number;
     machineInfo: Int32Array;
     pieceInfo: Int32Array;
     orients: Int32Array;
@@ -666,6 +684,8 @@ export const buildGpuProblem = (
         return nodeCount <= maxNodes;
     });
 
+    pool = [...pool.filter(isForcedModule), ...pool.filter(item => !isForcedModule(item))];
+    const forcedCount = pool.filter(isForcedModule).length;
     const poolIds = new Set(pool.map(item => item.id));
     const extraPool: PieceEntry[] = [];
     const ownedFixed: PieceEntry[] = [];
@@ -673,18 +693,22 @@ export const buildGpuProblem = (
     initialBoards.forEach((board, m) => board.forEach(row => row.forEach(cell => {
         if (!cell || cell === 'Locked' || seenOnBoard.has(cell.id)) return;
         seenOnBoard.add(cell.id);
-        if (cell.isStuck) ownedFixed.push({ item: cell, kind: 2, owner: m });
-        else if (isSpecialModule(cell) || cell.isLocked) ownedFixed.push({ item: cell, kind: 1, owner: m });
-        else if (!poolIds.has(cell.id)) extraPool.push({ item: cell, kind: 0, owner: -1 });
+        if (cell.isStuck) ownedFixed.push({item: cell, kind: 2, owner: m});
+        else if (isSpecialModule(cell) || cell.isLocked) ownedFixed.push({item: cell, kind: 1, owner: m});
+        else if (!poolIds.has(cell.id)) extraPool.push({item: cell, kind: 0, owner: -1});
     })));
 
-    const poolEntries: PieceEntry[] = pool.map(item => ({ item, kind: 0 as const, owner: -1 }));
+    const poolEntries: PieceEntry[] = pool.map(item => ({item, kind: 0 as const, owner: -1}));
     const pieces: PieceEntry[] = [...poolEntries, ...extraPool, ...ownedFixed];
     const poolCount = poolEntries.length + extraPool.length;
     if (pieces.length > PMAX) return `more than ${PMAX} modules`;
 
-    extraPool.forEach(entry => { if (!precomputedInternal.has(entry.item.id)) precomputedInternal.set(entry.item.id, applyInternalEffects(entry.item)); });
-    ownedFixed.forEach(entry => { if (!precomputedInternal.has(entry.item.id)) precomputedInternal.set(entry.item.id, applyInternalEffects(entry.item)); });
+    extraPool.forEach(entry => {
+        if (!precomputedInternal.has(entry.item.id)) precomputedInternal.set(entry.item.id, applyInternalEffects(entry.item));
+    });
+    ownedFixed.forEach(entry => {
+        if (!precomputedInternal.has(entry.item.id)) precomputedInternal.set(entry.item.id, applyInternalEffects(entry.item));
+    });
 
     const orientRecords: number[] = [];
     const shapeTable = new Map<string, [number, number]>();
@@ -697,8 +721,14 @@ export const buildGpuProblem = (
         for (const o of ors) {
             const rec = new Array(OR).fill(0);
             rec[0] = o.count;
-            rec[1] = o.minX; rec[2] = o.maxX; rec[3] = o.minY; rec[4] = o.maxY;
-            for (let i = 0; i < o.count; i++) { rec[5 + i] = o.xs[i]; rec[10 + i] = o.ys[i]; }
+            rec[1] = o.minX;
+            rec[2] = o.maxX;
+            rec[3] = o.minY;
+            rec[4] = o.maxY;
+            for (let i = 0; i < o.count; i++) {
+                rec[5 + i] = o.xs[i];
+                rec[10 + i] = o.ys[i];
+            }
             orientRecords.push(...rec);
         }
         shapeTable.set(shape, [start, ors.length]);
@@ -721,6 +751,7 @@ export const buildGpuProblem = (
         if (item.effects.includes('Receiver')) flags |= 8;
         flags |= (Math.min(countEffect(item, 'Negative Feedback'), 3)) << 4;
         if (isLumpyModule(item)) flags |= 64;
+        if (isForcedModule(item)) flags |= 128;
         flags |= entry.kind << 8;
 
         let mask = 0;
@@ -793,9 +824,31 @@ export const buildGpuProblem = (
     }
 
     return {
-        machines, initialBoards, pieces, poolCount, machineInfo, pieceInfo,
+        machines, initialBoards, pieces, poolCount, forcedCount, machineInfo, pieceInfo,
         orients: new Int32Array(orientRecords), pieceValue, chain0, objective, rows, cols, pieceIndex
     };
+};
+
+export const boardsToState = (problem: GpuProblem, boards: Board[]): Int32Array | null => {
+    const state = new Int32Array(CHS).fill(-2);
+    for (let p = 0; p < PMAX; p++) state[MMAX * CELLS + p] = -1;
+    for (let m = 0; m < problem.machines.length; m++) {
+        for (let y = 0; y < problem.rows[m]; y++) {
+            for (let x = 0; x < problem.cols[m]; x++) {
+                const cell = boards[m][y][x];
+                const idx = m * CELLS + y * problem.cols[m] + x;
+                if (cell === 'Locked') state[idx] = -2;
+                else if (cell === null || cell === undefined) state[idx] = -1;
+                else {
+                    const p = problem.pieceIndex.get(cell.id);
+                    if (p === undefined) return null;
+                    state[idx] = p;
+                    state[MMAX * CELLS + p] = m;
+                }
+            }
+        }
+    }
+    return state;
 };
 
 export const decodeChain = (problem: GpuProblem, state: Int32Array): Board[] =>
@@ -844,10 +897,11 @@ interface GpuContext {
     machineCount: number;
     tierCount: number;
     poolCount: number;
+    forcedCount: number;
     lost: boolean;
 }
 
-const writeParams = (ctx: GpuContext, steps: number, seed: number, mode: number, tMin: number, tMax: number, tScale: number) => {
+const writeParams = (ctx: GpuContext, steps: number, seed: number, _mode: number, tMin: number, tMax: number, tScale: number) => {
     const buf = new ArrayBuffer(48);
     const u = new Uint32Array(buf);
     const f = new Float32Array(buf);
@@ -858,7 +912,7 @@ const writeParams = (ctx: GpuContext, steps: number, seed: number, mode: number,
     u[4] = ctx.poolCount;
     u[5] = steps;
     u[6] = seed >>> 0;
-    u[7] = mode;
+    u[7] = ctx.forcedCount;
     f[8] = tMin;
     f[9] = tMax;
     f[10] = BALANCE_PENALTY_WEIGHT;
@@ -869,7 +923,7 @@ const writeParams = (ctx: GpuContext, steps: number, seed: number, mode: number,
 export const createGpuContext = async (problem: GpuProblem, chainCount: number): Promise<GpuContext> => {
     const gpu = (navigator as any).gpu;
     if (!gpu) throw new Error('WebGPU is not supported by this browser');
-    const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
+    const adapter = await gpu.requestAdapter({powerPreference: 'high-performance'});
     if (!adapter) throw new Error('no GPU adapter is available');
     const device = await adapter.requestDevice();
 
@@ -880,17 +934,40 @@ export const createGpuContext = async (problem: GpuProblem, chainCount: number):
     const isSoftware = Boolean(adapter.isFallbackAdapter) || /swiftshader|llvmpipe|software/i.test(adapterLabel);
 
     const ctx: GpuContext = {
-        device, adapterLabel, isSoftware,
-        paramsBuf: null, minfoBuf: null, pinfoBuf: null, orientBuf: null, pvalueBuf: null,
-        chainsBuf: null, chainObjBuf: null, dbgBuf: null, stagingObj: null, stagingState: null, stagingDbg: null,
-        mainPipeline: null, evalPipeline: null, bindGroup: null,
-        chainCount, pieceCount: problem.pieces.length, machineCount: problem.machines.length,
-        tierCount: problem.objective.tierCount, poolCount: problem.poolCount, lost: false
+        device,
+        adapterLabel,
+        isSoftware,
+        paramsBuf: null,
+        minfoBuf: null,
+        pinfoBuf: null,
+        orientBuf: null,
+        pvalueBuf: null,
+        chainsBuf: null,
+        chainObjBuf: null,
+        dbgBuf: null,
+        stagingObj: null,
+        stagingState: null,
+        stagingDbg: null,
+        mainPipeline: null,
+        evalPipeline: null,
+        bindGroup: null,
+        chainCount,
+        pieceCount: problem.pieces.length,
+        machineCount: problem.machines.length,
+        tierCount: problem.objective.tierCount,
+        poolCount: problem.poolCount,
+        forcedCount: problem.forcedCount,
+        lost: false
     };
-    device.lost.then(() => { ctx.lost = true; });
+    device.lost.then(() => {
+        ctx.lost = true;
+    });
 
     const U = (globalThis as any).GPUBufferUsage;
-    const mk = (size: number, usage: number) => device.createBuffer({ size: Math.max(16, Math.ceil(size / 4) * 4), usage });
+    const mk = (size: number, usage: number) => device.createBuffer({
+        size: Math.max(16, Math.ceil(size / 4) * 4),
+        usage
+    });
     const upload = (buf: any, data: ArrayBufferView) => device.queue.writeBuffer(buf, 0, data as any);
 
     ctx.paramsBuf = mk(48, U.UNIFORM | U.COPY_DST);
@@ -911,7 +988,7 @@ export const createGpuContext = async (problem: GpuProblem, chainCount: number):
     upload(ctx.pvalueBuf, problem.pieceValue);
 
     device.pushErrorScope('validation');
-    const module = device.createShaderModule({ code: WGSL });
+    const module = device.createShaderModule({code: WGSL});
     const compilation = await module.getCompilationInfo();
     const errors = compilation.messages.filter((m: any) => m.type === 'error');
     if (errors.length > 0) {
@@ -920,33 +997,39 @@ export const createGpuContext = async (problem: GpuProblem, chainCount: number):
     const stage = (globalThis as any).GPUShaderStage.COMPUTE;
     const bindGroupLayout = device.createBindGroupLayout({
         entries: [
-            { binding: 0, visibility: stage, buffer: { type: 'uniform' } },
-            { binding: 1, visibility: stage, buffer: { type: 'read-only-storage' } },
-            { binding: 2, visibility: stage, buffer: { type: 'read-only-storage' } },
-            { binding: 3, visibility: stage, buffer: { type: 'read-only-storage' } },
-            { binding: 4, visibility: stage, buffer: { type: 'read-only-storage' } },
-            { binding: 5, visibility: stage, buffer: { type: 'storage' } },
-            { binding: 6, visibility: stage, buffer: { type: 'storage' } },
-            { binding: 7, visibility: stage, buffer: { type: 'storage' } }
+            {binding: 0, visibility: stage, buffer: {type: 'uniform'}},
+            {binding: 1, visibility: stage, buffer: {type: 'read-only-storage'}},
+            {binding: 2, visibility: stage, buffer: {type: 'read-only-storage'}},
+            {binding: 3, visibility: stage, buffer: {type: 'read-only-storage'}},
+            {binding: 4, visibility: stage, buffer: {type: 'read-only-storage'}},
+            {binding: 5, visibility: stage, buffer: {type: 'storage'}},
+            {binding: 6, visibility: stage, buffer: {type: 'storage'}},
+            {binding: 7, visibility: stage, buffer: {type: 'storage'}}
         ]
     });
-    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
-    ctx.mainPipeline = await device.createComputePipelineAsync({ layout: pipelineLayout, compute: { module, entryPoint: 'main' } });
-    ctx.evalPipeline = await device.createComputePipelineAsync({ layout: pipelineLayout, compute: { module, entryPoint: 'eval_only' } });
+    const pipelineLayout = device.createPipelineLayout({bindGroupLayouts: [bindGroupLayout]});
+    ctx.mainPipeline = await device.createComputePipelineAsync({
+        layout: pipelineLayout,
+        compute: {module, entryPoint: 'main'}
+    });
+    ctx.evalPipeline = await device.createComputePipelineAsync({
+        layout: pipelineLayout,
+        compute: {module, entryPoint: 'eval_only'}
+    });
     const scopeError = await device.popErrorScope();
     if (scopeError) throw new Error('GPU validation error: ' + scopeError.message);
 
     const entries = [
-        { binding: 0, resource: { buffer: ctx.paramsBuf } },
-        { binding: 1, resource: { buffer: ctx.minfoBuf } },
-        { binding: 2, resource: { buffer: ctx.pinfoBuf } },
-        { binding: 3, resource: { buffer: ctx.orientBuf } },
-        { binding: 4, resource: { buffer: ctx.pvalueBuf } },
-        { binding: 5, resource: { buffer: ctx.chainsBuf } },
-        { binding: 6, resource: { buffer: ctx.chainObjBuf } },
-        { binding: 7, resource: { buffer: ctx.dbgBuf } }
+        {binding: 0, resource: {buffer: ctx.paramsBuf}},
+        {binding: 1, resource: {buffer: ctx.minfoBuf}},
+        {binding: 2, resource: {buffer: ctx.pinfoBuf}},
+        {binding: 3, resource: {buffer: ctx.orientBuf}},
+        {binding: 4, resource: {buffer: ctx.pvalueBuf}},
+        {binding: 5, resource: {buffer: ctx.chainsBuf}},
+        {binding: 6, resource: {buffer: ctx.chainObjBuf}},
+        {binding: 7, resource: {buffer: ctx.dbgBuf}}
     ];
-    ctx.bindGroup = device.createBindGroup({ layout: bindGroupLayout, entries });
+    ctx.bindGroup = device.createBindGroup({layout: bindGroupLayout, entries});
 
     const seedChains = new Int32Array(chainCount * CHS);
     for (let c = 0; c < chainCount; c++) seedChains.set(problem.chain0, c * CHS);
@@ -956,9 +1039,17 @@ export const createGpuContext = async (problem: GpuProblem, chainCount: number):
 
 export const destroyGpuContext = (ctx: GpuContext) => {
     for (const key of ['paramsBuf', 'minfoBuf', 'pinfoBuf', 'orientBuf', 'pvalueBuf', 'chainsBuf', 'chainObjBuf', 'dbgBuf', 'stagingObj', 'stagingState', 'stagingDbg']) {
-        try { (ctx as any)[key]?.destroy(); } catch { void 0; }
+        try {
+            (ctx as any)[key]?.destroy();
+        } catch {
+            void 0;
+        }
     }
-    try { ctx.device.destroy(); } catch { void 0; }
+    try {
+        ctx.device.destroy();
+    } catch {
+        void 0;
+    }
 };
 
 const dispatchMain = async (ctx: GpuContext, steps: number, seed: number, tMin: number, tMax: number, tScale: number): Promise<Float32Array> => {
@@ -1019,6 +1110,9 @@ const T_MAX = 300;
 const TARGET_DISPATCH_MS = 160;
 const ELITE_EVERY = 3;
 const ELITE_FRACTION = 0.25;
+const POLISH_FIRST_MS = 2500;
+const POLISH_EVERY_MS = 4000;
+const POLISH_RUN_MS = 1200;
 
 export const runGpuEngine: EngineRunner = async (
     machines,
@@ -1030,7 +1124,7 @@ export const runGpuEngine: EngineRunner = async (
     onStatus
 ) => {
     const fallback = async (reason: string, boards: any[][][] = initialBoards) => {
-        onStatus?.({ backend: 'cpu', fallback: true, message: `GPU unavailable (${reason}). Using the CPU solver.` });
+        onStatus?.({backend: 'cpu', fallback: true, message: `GPU unavailable (${reason}). Using the CPU solver.`});
         await runOptimizationEngine(machines, boards, searchPoolInventory, fullInventory, isSolvingRef, onUpdate);
     };
 
@@ -1056,7 +1150,7 @@ export const runGpuEngine: EngineRunner = async (
         const stats = boards.map(b => calculateBoardStats(b, fullInventory, inventoryById));
         const out = new Float64Array(tierLen);
         computeTiers(out, machines, problem.objective, i => stats[i], i => boards[i]);
-        return { stats, tiers: out };
+        return {stats, tiers: out};
     };
 
     let bestBoards: Board[] = initialBoards.map(b => b.map(row => [...row])) as Board[];
@@ -1089,22 +1183,71 @@ export const runGpuEngine: EngineRunner = async (
         emitCount++;
     };
 
+    const polish = async (boards: Board[]): Promise<Board[] | null> => {
+        const ref = {current: true};
+        const stopTimer = setTimeout(() => {
+            ref.current = false;
+        }, POLISH_RUN_MS);
+        const watcher = setInterval(() => {
+            if (!isSolvingRef.current) ref.current = false;
+        }, 100);
+        let result: EngineUpdate | null = null;
+        try {
+            await runOptimizationEngine(machines, boards, searchPoolInventory, fullInventory, ref, u => {
+                result = u;
+            });
+        } finally {
+            clearTimeout(stopTimer);
+            clearInterval(watcher);
+        }
+        if (result === null) return null;
+        const final: EngineUpdate = result;
+        return machines.map(m => final.get(m.id)!.board as Board);
+    };
+
+    const seedPopulation = (fraction: number) => {
+        const victims = Math.floor(ctx.chainCount * fraction);
+        for (let v = 0; v < victims; v++) {
+            const target = Math.floor(Math.random() * ctx.chainCount);
+            ctx.device.queue.writeBuffer(ctx.chainsBuf, target * CHS * 4, bestSnapshot as any);
+        }
+    };
+
+    let nextPolishAt = performance.now() + POLISH_FIRST_MS;
     let steps = 16;
     let dispatches = 0;
     let totalSteps = 0;
     let lastStatus = 0;
     const startedAt = performance.now();
     const label = ctx.isSoftware ? `${ctx.adapterLabel} (software)` : ctx.adapterLabel;
-    onStatus?.({ backend: 'gpu', message: `GPU solver started on ${label} with ${ctx.chainCount} parallel chains.` });
+    onStatus?.({backend: 'gpu', message: `GPU solver started on ${label} with ${ctx.chainCount} parallel chains.`});
 
     let failure: string | null = null;
     try {
         while (isSolvingRef.current && !ctx.lost) {
             const t0 = performance.now();
             const tScale = 1;
-            const objs = await dispatchMain(ctx, steps, (dispatches * 7919 + 13) >>> 0, T_MIN, T_MAX, tScale);
+            const polishNow = performance.now() >= nextPolishAt;
+            const dispatchSteps = polishNow ? Math.min(8192, steps * 6) : steps;
+            const gpuWork = dispatchMain(ctx, dispatchSteps, (dispatches * 7919 + 13) >>> 0, T_MIN, T_MAX, tScale);
+            if (polishNow) {
+                const polished = await polish(bestBoards);
+                nextPolishAt = performance.now() + POLISH_EVERY_MS;
+                if (polished !== null) {
+                    const verifiedPolish = tiersOf(polished);
+                    const polishedState = boardsToState(problem, polished);
+                    if (polishedState !== null && compareTiersLocal(verifiedPolish.tiers, bestEval.tiers, tierLen) > 0) {
+                        bestBoards = polished;
+                        bestEval = verifiedPolish;
+                        bestSnapshot = polishedState;
+                        pending = true;
+                    }
+                }
+            }
+            const objs = await gpuWork;
             dispatches++;
-            totalSteps += steps * ctx.chainCount;
+            totalSteps += dispatchSteps * ctx.chainCount;
+            if (polishNow && pending) seedPopulation(ELITE_FRACTION);
 
             let bestChain = -1;
             for (let c = 0; c < ctx.chainCount; c++) {
@@ -1128,13 +1271,7 @@ export const runGpuEngine: EngineRunner = async (
             }
             if (pending) emit();
 
-            if (dispatches % ELITE_EVERY === 0) {
-                const victims = Math.floor(ctx.chainCount * ELITE_FRACTION);
-                for (let v = 0; v < victims; v++) {
-                    const target = Math.floor(Math.random() * ctx.chainCount);
-                    ctx.device.queue.writeBuffer(ctx.chainsBuf, target * CHS * 4, bestSnapshot as any);
-                }
-            }
+            if (dispatches % ELITE_EVERY === 0) seedPopulation(ELITE_FRACTION);
 
             const elapsed = performance.now() - t0;
             const scale = Math.min(2, Math.max(0.5, TARGET_DISPATCH_MS / Math.max(elapsed, 1)));
@@ -1144,7 +1281,10 @@ export const runGpuEngine: EngineRunner = async (
             if (now - lastStatus > 1000) {
                 lastStatus = now;
                 const rate = totalSteps / ((now - startedAt) / 1000);
-                onStatus?.({ backend: 'gpu', message: `GPU solver on ${label}: ${ctx.chainCount} chains, ${(rate / 1e6).toFixed(2)}M search steps/s.` });
+                onStatus?.({
+                    backend: 'gpu',
+                    message: `GPU solver on ${label}: ${ctx.chainCount} chains, ${(rate / 1e6).toFixed(2)}M search steps/s.`
+                });
             }
             await new Promise(resolve => setTimeout(resolve, 0));
         }
@@ -1153,12 +1293,19 @@ export const runGpuEngine: EngineRunner = async (
         failure = String(e?.message ?? e).slice(0, 140);
     }
 
-    try { destroyGpuContext(ctx); } catch { void 0; }
+    try {
+        destroyGpuContext(ctx);
+    } catch {
+        void 0;
+    }
 
     if (pending) emit();
     if (failure !== null && isSolvingRef.current) {
         await fallback(failure, bestBoards);
         return;
     }
-    onStatus?.({ backend: 'gpu', message: `GPU solver stopped (${label}, ${totalSteps.toLocaleString()} search steps).` });
+    onStatus?.({
+        backend: 'gpu',
+        message: `GPU solver stopped (${label}, ${totalSteps.toLocaleString()} search steps).`
+    });
 };

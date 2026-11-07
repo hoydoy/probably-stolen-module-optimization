@@ -38,6 +38,7 @@ export interface InventoryItem {
     effectValues: [number, number];
     isInfinite?: boolean;
     isLocked?: boolean;
+    autoPlace?: boolean;
     isStuck?: boolean;
     originalPath?: string;
 }

@@ -51,7 +51,7 @@ const IDENTIFIER_NAMES: Record<string, string> = {
     mirage_projector: 'Mirage Projector',
     evaporator: 'Evaporator',
     hydroponic: 'Hydroponic System',
-    '3d_printer': 'Printer',
+    '3d_printer': '3D Printer',
     dna_manipulator: 'DNA Manipulator',
     save_bag: 'Save Bag',
 };

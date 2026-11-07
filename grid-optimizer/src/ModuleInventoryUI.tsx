@@ -78,11 +78,11 @@ const InventoryItemRow = React.memo(({
                                          handleBlurEffectValue,
                                          onRemove,
                                          onDragStart,
-                                         onToggleInfinite,
-                                         onToggleLock
+                                         onToggleInfinite, onToggleLock, onToggleAutoPlace
                                      }: any) => {
     const fixedBase = isFixedStatModule(item) ? getBaseStats(item) : null;
     const shownStats = item.color !== 'White' ? (fixedBase ?? applyInternalEffects(item)) : null;
+    const allowsAuto = !!getModuleTemplate(item)?.allowedMachines?.length && !item.isStuck;
     return (
         <div
             onMouseDown={(e) => onDragStart(e, item)}
@@ -125,6 +125,28 @@ const InventoryItemRow = React.memo(({
                                 <span style={{color: '#888'}}>No stat changes</span>
                             )}
                         </div>
+                    )}
+                    {allowsAuto && (
+                        <label
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                fontSize: '0.75em',
+                                color: '#ccc',
+                                cursor: isAnySolving ? 'not-allowed' : 'pointer',
+                                pointerEvents: 'auto'
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={!!item.autoPlace}
+                                disabled={isAnySolving}
+                                onChange={(e) => onToggleAutoPlace(item.id, e.target.checked)}
+                            />
+                            Auto-place
+                        </label>
                     )}
                     {item.color !== 'White' && !fixedBase ? (
                         <div style={{
@@ -1399,6 +1421,10 @@ export default function ModuleInventoryUI() {
         ));
     }, []);
 
+    const handleToggleAutoPlace = useCallback((itemId: string, autoPlace: boolean) => {
+        setInventory(prev => prev.map(item => item.id === itemId ? {...item, autoPlace} : item));
+    }, []);
+
     const handleToggleLock = useCallback((itemId: string, isLocked: boolean) => {
         setInventory(prev => prev.map(i => i.id === itemId ? {...i, isLocked} : i));
     }, []);
@@ -1893,6 +1919,26 @@ export default function ModuleInventoryUI() {
                     min-height: 0;
                     margin-top: 20px;
                 }
+                .work-layout {
+                    display: flex;
+                    gap: 20px;
+                    height: 74vh;
+                    min-height: 520px;
+                    margin-top: 20px;
+                }
+                .machines-pane {
+                    flex: 2;
+                    min-width: 0;
+                    overflow-y: auto;
+                    padding: 0 8px 10px 0;
+                }
+                .inventory-pane {
+                    flex: 1;
+                    min-width: 0;
+                    min-height: 0;
+                    display: flex;
+                    flex-direction: column;
+                }
                 .machines-container {
                     display: flex;
                     flex-wrap: wrap;
@@ -1911,6 +1957,16 @@ export default function ModuleInventoryUI() {
                         flex-direction: column;
                         gap: 15px;
                         min-height: auto;
+                    }
+                    .work-layout {
+                        flex-direction: column;
+                        height: auto;
+                    }
+                    .machines-pane {
+                        overflow-y: visible;
+                    }
+                    .inventory-pane {
+                        max-height: 70vh;
                     }
                     .stats-header {
                         gap: 15px;
@@ -2046,34 +2102,6 @@ export default function ModuleInventoryUI() {
                 </div>
             </div>
 
-            <div className="machines-container">
-                {machines.map(m => (
-                    <MachineInstance
-                        key={m.id}
-                        machineId={m.id}
-                        ref={(el: any) => {
-                            if (el) machinesRef.current[m.id] = el;
-                        }}
-                        inventory={expandedInventory}
-                        setInventory={setInventory}
-                        getUsedItems={getUsedItems}
-                        dragState={dragState}
-                        setHoverInfo={setHoverInfo}
-                        onDuplicate={handleDuplicateMachine}
-                        onDelete={handleDeleteMachine}
-                        cellSize={cellSize}
-                        onSolvingChange={handleSolvingChange}
-                        onDragTargetRefChange={setDragTargetRefChange}
-                        isAnySolving={isAnySolving}
-                        isThisMachineSolving={solvingStates[m.id] || false}
-                        isGlobalSolving={isGlobalSolving}
-                        onStopGlobal={handleStopGlobal}
-                        runEngine={runEngine}
-                        canDelete={machines.length > 1}
-                    />
-                ))}
-            </div>
-
             <div style={{
                 display: 'flex',
                 gap: '15px',
@@ -2189,6 +2217,221 @@ export default function ModuleInventoryUI() {
                     ? "Path copied to clipboard!"
                     : "Default save_#.es3 file path: %USERPROFILE%\\AppData\\LocalLow\\Questing Goose Studio\\Probably Stolen"
                 }
+            </div>
+
+            <div className="work-layout">
+                <div className="machines-pane">
+                    <div className="machines-container">
+                        {machines.map(m => (
+                            <MachineInstance
+                                key={m.id}
+                                machineId={m.id}
+                                ref={(el: any) => {
+                                    if (el) machinesRef.current[m.id] = el;
+                                }}
+                                inventory={expandedInventory}
+                                setInventory={setInventory}
+                                getUsedItems={getUsedItems}
+                                dragState={dragState}
+                                setHoverInfo={setHoverInfo}
+                                onDuplicate={handleDuplicateMachine}
+                                onDelete={handleDeleteMachine}
+                                cellSize={cellSize}
+                                onSolvingChange={handleSolvingChange}
+                                onDragTargetRefChange={setDragTargetRefChange}
+                                isAnySolving={isAnySolving}
+                                isThisMachineSolving={solvingStates[m.id] || false}
+                                isGlobalSolving={isGlobalSolving}
+                                onStopGlobal={handleStopGlobal}
+                                runEngine={runEngine}
+                                canDelete={machines.length > 1}
+                            />
+                        ))}
+                    </div>
+                </div>
+                <div className="inventory-pane">
+                    <div
+                        style={{
+                            flex: '1',
+                            backgroundColor: '#1c1c1e',
+                            padding: '20px',
+                            borderRadius: '8px',
+                            border: '1px solid #2c2c2e',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            minHeight: 0,
+                            height: '100%',
+                            boxSizing: 'border-box'
+                        }}
+                        onMouseMove={() => {
+                            if (dragState && dragState.sourceMachineId !== null) {
+                                setDragTargetRefChange({machineId: null, x: -1, y: -1});
+                            }
+                        }}
+                    >
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            marginBottom: '15px',
+                            alignItems: 'center'
+                        }}>
+                        <span style={{color: '#888', fontSize: '0.9em'}}>
+                            {filteredInventory.length.toLocaleString()} Selected
+                            {hiddenInventoryCount > 0 &&
+                                <span style={{color: '#666'}}> (showing {MAX_VISIBLE_INVENTORY_ROWS})</span>}
+                        </span>
+                            <button
+                                onClick={() => {
+                                    setInventory([]);
+                                    handleClearAll();
+                                }}
+                                disabled={isAnySolving || inventory.length === 0}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: (isAnySolving || inventory.length === 0) ? '#555' : '#ff4d4d',
+                                    cursor: (isAnySolving || inventory.length === 0) ? 'not-allowed' : 'pointer',
+                                    fontSize: '0.85em',
+                                    textDecoration: 'underline'
+                                }}
+                            >
+                                Clear List
+                            </button>
+                        </div>
+
+                        <div style={{display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px'}}>
+                            <select value={invFilterGroup}
+                                    onChange={(e) => setInvFilterGroup(e.target.value as FilterGroup | 'Placed' | 'NotPlaced')}
+                                    style={{
+                                        flex: 1,
+                                        minWidth: '110px',
+                                        padding: '6px',
+                                        backgroundColor: '#333',
+                                        color: 'white',
+                                        border: '1px solid #555',
+                                        borderRadius: '4px',
+                                        outline: 'none',
+                                        fontSize: '0.8em'
+                                    }}>
+                                <option value="All">All Groups</option>
+                                <option value="Placed">Placed in Machine</option>
+                                <option value="NotPlaced">Not Placed in Machine</option>
+                                <option value="Performance">Performance</option>
+                                <option value="Quality">Quality</option>
+                                <option value="Efficiency">Efficiency</option>
+                                <option value="Special">Special</option>
+                            </select>
+                            <select value={invFilterSize}
+                                    onChange={(e) => setInvFilterSize(e.target.value === 'All' ? 'All' : Number(e.target.value) as any)}
+                                    style={{
+                                        flex: 1,
+                                        minWidth: '100px',
+                                        padding: '6px',
+                                        backgroundColor: '#333',
+                                        color: 'white',
+                                        border: '1px solid #555',
+                                        borderRadius: '4px',
+                                        outline: 'none',
+                                        fontSize: '0.8em'
+                                    }}>
+                                <option value="All">All Sizes</option>
+                                <option value={2}>Size 2</option>
+                                <option value={3}>Size 3</option>
+                                <option value={4}>Size 4</option>
+                                <option value={5}>Size 5</option>
+                            </select>
+                            <select value={invFilterEffect}
+                                    onChange={(e) => setInvFilterEffect(e.target.value as ItemEffect | 'All')} style={{
+                                flex: 1,
+                                minWidth: '120px',
+                                padding: '6px',
+                                backgroundColor: '#333',
+                                color: 'white',
+                                border: '1px solid #555',
+                                borderRadius: '4px',
+                                outline: 'none',
+                                fontSize: '0.8em'
+                            }}>
+                                <option value="All">All Effects</option>
+                                {EFFECTS_LIST.map(eff => <option key={eff}
+                                                                 value={eff}>{eff === 'None' ? 'No Effect' : eff}</option>)}
+                            </select>
+                            <select value={invFilterMachine} onChange={(e) => setInvFilterMachine(e.target.value)}
+                                    style={{
+                                        flex: 1,
+                                        minWidth: '120px',
+                                        padding: '6px',
+                                        backgroundColor: '#333',
+                                        color: 'white',
+                                        border: '1px solid #555',
+                                        borderRadius: '4px',
+                                        outline: 'none',
+                                        fontSize: '0.8em'
+                                    }}>
+                                <option value="All">All Machines</option>
+                                <option value="None">No Machine Restriction</option>
+                                {machineFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
+                            </select>
+                        </div>
+
+                        <div style={{display: 'flex', gap: '8px', marginBottom: '15px'}}>
+                            <button onClick={handleToggleDisplayLock}
+                                    disabled={isAnySolving || filteredInventory.length === 0} style={{
+                                flex: 1,
+                                padding: '6px',
+                                backgroundColor: '#2d2d2d',
+                                color: '#eee',
+                                border: '1px solid #444',
+                                borderRadius: '4px',
+                                fontSize: '0.8em',
+                                cursor: (isAnySolving || filteredInventory.length === 0) ? 'not-allowed' : 'pointer'
+                            }}>
+                                {allDisplayedLocked ? 'Unlock Displayed' : 'Lock Displayed'}
+                            </button>
+                        </div>
+
+                        <div style={{
+                            overflowY: 'auto',
+                            flex: 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                            paddingRight: '5px'
+                        }}>
+                            {visibleInventory.map((item) => (
+                                <InventoryItemRow
+                                    key={item.id}
+                                    item={item}
+                                    isAnySolving={isAnySolving}
+                                    updateItemEffect={handleUpdateItemEffect}
+                                    updateItemEffectValue={handleUpdateItemEffectValue}
+                                    handleBlurEffectValue={handleBlurEffectValue}
+                                    onRemove={handleRemoveItem}
+                                    onDragStart={handleInventoryDragStart}
+                                    onToggleInfinite={handleToggleInfiniteNodes}
+                                    onToggleLock={handleToggleLock}
+                                    onToggleStuck={handleToggleStuck}
+                                    onToggleAutoPlace={handleToggleAutoPlace}
+                                />
+                            ))}
+
+                            {hiddenInventoryCount > 0 && (
+                                <div style={{
+                                    padding: '10px 12px',
+                                    backgroundColor: '#252526',
+                                    borderRadius: '4px',
+                                    color: '#888',
+                                    fontSize: '0.8em',
+                                    textAlign: 'center'
+                                }}>
+                                    + {hiddenInventoryCount.toLocaleString()} more not shown.
+                                    <br/>
+                                    The optimizer still uses every module — only this list is capped.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div className="bottom-layout">
@@ -2326,184 +2569,8 @@ export default function ModuleInventoryUI() {
                         })}
                     </div>
                 </div>
-
-                <div
-                    style={{
-                        flex: '1',
-                        backgroundColor: '#1c1c1e',
-                        padding: '20px',
-                        borderRadius: '8px',
-                        border: '1px solid #2c2c2e',
-                        display: 'flex',
-                        flexDirection: 'column'
-                    }}
-                    onMouseMove={() => {
-                        if (dragState && dragState.sourceMachineId !== null) {
-                            setDragTargetRefChange({machineId: null, x: -1, y: -1});
-                        }
-                    }}
-                >
-                    <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        marginBottom: '15px',
-                        alignItems: 'center'
-                    }}>
-                        <span style={{color: '#888', fontSize: '0.9em'}}>
-                            {filteredInventory.length.toLocaleString()} Selected
-                            {hiddenInventoryCount > 0 &&
-                                <span style={{color: '#666'}}> (showing {MAX_VISIBLE_INVENTORY_ROWS})</span>}
-                        </span>
-                        <button
-                            onClick={() => {
-                                setInventory([]);
-                                handleClearAll();
-                            }}
-                            disabled={isAnySolving || inventory.length === 0}
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                color: (isAnySolving || inventory.length === 0) ? '#555' : '#ff4d4d',
-                                cursor: (isAnySolving || inventory.length === 0) ? 'not-allowed' : 'pointer',
-                                fontSize: '0.85em',
-                                textDecoration: 'underline'
-                            }}
-                        >
-                            Clear List
-                        </button>
-                    </div>
-
-                    <div style={{display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px'}}>
-                        <select value={invFilterGroup}
-                                onChange={(e) => setInvFilterGroup(e.target.value as FilterGroup | 'Placed' | 'NotPlaced')}
-                                style={{
-                                    flex: 1,
-                                    minWidth: '110px',
-                                    padding: '6px',
-                                    backgroundColor: '#333',
-                                    color: 'white',
-                                    border: '1px solid #555',
-                                    borderRadius: '4px',
-                                    outline: 'none',
-                                    fontSize: '0.8em'
-                                }}>
-                            <option value="All">All Groups</option>
-                            <option value="Placed">Placed in Machine</option>
-                            <option value="NotPlaced">Not Placed in Machine</option>
-                            <option value="Performance">Performance</option>
-                            <option value="Quality">Quality</option>
-                            <option value="Efficiency">Efficiency</option>
-                            <option value="Special">Special</option>
-                        </select>
-                        <select value={invFilterSize}
-                                onChange={(e) => setInvFilterSize(e.target.value === 'All' ? 'All' : Number(e.target.value) as any)}
-                                style={{
-                                    flex: 1,
-                                    minWidth: '100px',
-                                    padding: '6px',
-                                    backgroundColor: '#333',
-                                    color: 'white',
-                                    border: '1px solid #555',
-                                    borderRadius: '4px',
-                                    outline: 'none',
-                                    fontSize: '0.8em'
-                                }}>
-                            <option value="All">All Sizes</option>
-                            <option value={2}>Size 2</option>
-                            <option value={3}>Size 3</option>
-                            <option value={4}>Size 4</option>
-                            <option value={5}>Size 5</option>
-                        </select>
-                        <select value={invFilterEffect}
-                                onChange={(e) => setInvFilterEffect(e.target.value as ItemEffect | 'All')} style={{
-                            flex: 1,
-                            minWidth: '120px',
-                            padding: '6px',
-                            backgroundColor: '#333',
-                            color: 'white',
-                            border: '1px solid #555',
-                            borderRadius: '4px',
-                            outline: 'none',
-                            fontSize: '0.8em'
-                        }}>
-                            <option value="All">All Effects</option>
-                            {EFFECTS_LIST.map(eff => <option key={eff}
-                                                             value={eff}>{eff === 'None' ? 'No Effect' : eff}</option>)}
-                        </select>
-                        <select value={invFilterMachine} onChange={(e) => setInvFilterMachine(e.target.value)} style={{
-                            flex: 1,
-                            minWidth: '120px',
-                            padding: '6px',
-                            backgroundColor: '#333',
-                            color: 'white',
-                            border: '1px solid #555',
-                            borderRadius: '4px',
-                            outline: 'none',
-                            fontSize: '0.8em'
-                        }}>
-                            <option value="All">All Machines</option>
-                            <option value="None">No Machine Restriction</option>
-                            {machineFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
-                        </select>
-                    </div>
-
-                    <div style={{display: 'flex', gap: '8px', marginBottom: '15px'}}>
-                        <button onClick={handleToggleDisplayLock}
-                                disabled={isAnySolving || filteredInventory.length === 0} style={{
-                            flex: 1,
-                            padding: '6px',
-                            backgroundColor: '#2d2d2d',
-                            color: '#eee',
-                            border: '1px solid #444',
-                            borderRadius: '4px',
-                            fontSize: '0.8em',
-                            cursor: (isAnySolving || filteredInventory.length === 0) ? 'not-allowed' : 'pointer'
-                        }}>
-                            {allDisplayedLocked ? 'Unlock Displayed' : 'Lock Displayed'}
-                        </button>
-                    </div>
-
-                    <div style={{
-                        overflowY: 'auto',
-                        flex: 1,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                        paddingRight: '5px'
-                    }}>
-                        {visibleInventory.map((item) => (
-                            <InventoryItemRow
-                                key={item.id}
-                                item={item}
-                                isAnySolving={isAnySolving}
-                                updateItemEffect={handleUpdateItemEffect}
-                                updateItemEffectValue={handleUpdateItemEffectValue}
-                                handleBlurEffectValue={handleBlurEffectValue}
-                                onRemove={handleRemoveItem}
-                                onDragStart={handleInventoryDragStart}
-                                onToggleInfinite={handleToggleInfiniteNodes}
-                                onToggleLock={handleToggleLock}
-                                onToggleStuck={handleToggleStuck}
-                            />
-                        ))}
-
-                        {hiddenInventoryCount > 0 && (
-                            <div style={{
-                                padding: '10px 12px',
-                                backgroundColor: '#252526',
-                                borderRadius: '4px',
-                                color: '#888',
-                                fontSize: '0.8em',
-                                textAlign: 'center'
-                            }}>
-                                + {hiddenInventoryCount.toLocaleString()} more not shown.
-                                <br/>
-                                The optimizer still uses every module — only this list is capped.
-                            </div>
-                        )}
-                    </div>
-                </div>
             </div>
+
 
             <DragGhost dragState={dragState} cellSize={cellSize}/>
         </div>

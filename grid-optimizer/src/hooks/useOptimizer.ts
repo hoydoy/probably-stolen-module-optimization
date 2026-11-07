@@ -3,7 +3,7 @@ import {createClient} from '@supabase/supabase-js';
 import type {GridTier, InventoryItem, Stats, TargetStats, Point, ModuleShape, ModuleColor, ItemEffect} from '../types';
 import type {Orientation} from '../utils';
 import {
-    getBaseStats,
+    getModuleTemplate, getBaseStats,
     applyInternalEffects,
     PRECOMPUTED_ORIENTATIONS,
     roundStat,
@@ -37,7 +37,7 @@ const SPECIAL_MODULE_IDS: string[] = [
     'Positive Trait Filter Module',
     'Precision Extraction Module',
     'Genetic Stabilizer Module',
-    'Filterweed Production Hydroponic Module',
+    'Fillerweed Production Hydroponic Module',
     'Hydroreed Filter Hydroponic Module',
     'Nutrifruit Hydroponic Module',
     'Computer Numerical Control Module',
@@ -743,8 +743,10 @@ export const STAT_KEYS: (keyof Stats)[] = ['Performance', 'Quality', 'Efficiency
 
 export const isLumpyModule = (item: InventoryItem) => item.displayName.includes('Neural Core');
 
-export const isSpecialModule = (item: InventoryItem) =>
-    item.displayName.includes('Alarm Transmitter Module')
+export const isForcedModule = (item: InventoryItem) =>
+    !!item.autoPlace && !item.isStuck && !item.isLocked && !!getModuleTemplate(item)?.allowedMachines?.length;
+
+export const isSpecialModule = (item: InventoryItem) => !item.autoPlace && (item.displayName.includes('Alarm Transmitter Module')
     || item.displayName.includes('Junk Processing')
     || item.displayName.includes('(Blast)')
     || item.displayName.includes('Evaporator Solvent Recovery Module')
@@ -757,13 +759,13 @@ export const isSpecialModule = (item: InventoryItem) =>
     || item.displayName.includes('Positive Trait Filter Module')
     || item.displayName.includes('Precision Extraction Module')
     || item.displayName.includes('Genetic Stabilizer Module')
-    || item.displayName.includes('Filterweed Production')
+    || item.displayName.includes('Fillerweed Production')
     || item.displayName.includes('Hydroreed Filter')
     || item.displayName.includes('Nutrifruit Hydroponic Module')
     || item.displayName.includes('Computer Numerical Control Module')
     || item.displayName.includes('Melee Batch Module')
     || item.displayName.includes('Metal Printer Module')
-    || item.displayName.includes('Glitched Module');
+    || item.displayName.includes('Glitched Module'));
 
 export const statIsIgnored = (m: MachineConfig, key: keyof Stats) => Boolean(m.ignoreStats?.[key]);
 const DEFAULT_STAT_PRIORITY = 1;
@@ -816,6 +818,10 @@ export const buildSearchPool = (
     for (const item of inventory) {
         if (isSpecialModule(item)) continue;
         if (item.isLocked || item.isStuck) continue;
+        if (isForcedModule(item)) {
+            kept.push(item);
+            continue;
+        }
 
         if (item.color === 'White') {
             kept.push(item);
@@ -932,6 +938,7 @@ export interface Objective {
     tierCount: number;
     tierOf: (m: MachineConfig, key: keyof Stats) => number;
     lumpyIds: string[];
+    forcedIds: string[];
 }
 
 export const createObjective = (machines: MachineConfig[], fullInventory: InventoryItem[]): Objective => {
@@ -945,9 +952,10 @@ export const createObjective = (machines: MachineConfig[], fullInventory: Invent
     const rankOrder = [...activeRanks].sort((a, b) => a - b);
     const tierOfRank = new Map<number, number>(rankOrder.map((r, i) => [r, i]));
     return {
-        tierCount: rankOrder.length,
-        tierOf: (m: MachineConfig, key: keyof Stats) => tierOfRank.get(priorityOf(m, key))!,
-        lumpyIds: fullInventory.filter(isLumpyModule).map(item => item.id)
+        tierCount: rankOrder.length + 1,
+        tierOf: (m: MachineConfig, key: keyof Stats) => tierOfRank.get(priorityOf(m, key))! + 1,
+        lumpyIds: fullInventory.filter(isLumpyModule).map(item => item.id),
+        forcedIds: fullInventory.filter(isForcedModule).map(item => item.id)
     };
 };
 
@@ -958,10 +966,16 @@ export const computeTiers = (
     statsFor: (mIdx: number) => ReturnType<typeof calculateBoardStats>,
     boardFor: (mIdx: number) => (InventoryItem | 'Locked' | null)[][]
 ) => {
-    const {tierCount, tierOf, lumpyIds} = objective;
+    const {tierCount, tierOf, lumpyIds, forcedIds} = objective;
     const machineCount = machines.length;
     out.fill(0);
     let totalPiecesPlaced = 0;
+    if (forcedIds.length > 0) {
+        for (let mIdx = 0; mIdx < machineCount; mIdx++) {
+            const placedStats = statsFor(mIdx).pieceStats;
+            for (const id of forcedIds) if (placedStats.has(id)) out[0] += 1;
+        }
+    }
 
     for (let mIdx = 0; mIdx < machineCount; mIdx++) {
         const stats = statsFor(mIdx);
@@ -1040,6 +1054,10 @@ export const buildIneligibleFlags = (
     const board = boards[mIdx];
     const isSmallGrid = board.length === EVAPORATOR_GRID_SIZE.rows && (board[0]?.length ?? 0) === EVAPORATOR_GRID_SIZE.cols;
     for (let i = 0; i < searchPool.length; i++) {
+        if (!isModuleAllowedInMachine(searchPool[i], m.machineType ?? '')) {
+            flags[i] = 1;
+            continue;
+        }
         if (!isLumpyModule(searchPool[i])) continue;
         const s = internalOf(i);
         let usedValue = 0;
@@ -1053,6 +1071,207 @@ export const buildIneligibleFlags = (
     }
     return flags;
 });
+
+
+export interface StatsContext {
+    internal: Map<string, Stats>;
+    flags: Map<string, number>;
+}
+
+const effectFlags = (item: InventoryItem) =>
+    (item.color === 'White' ? 1 : 0)
+    | (item.effects.includes('Side Mount') ? 2 : 0)
+    | (item.effects.includes('Top Mount') ? 4 : 0)
+    | (item.effects.includes('Receiver') ? 8 : 0)
+    | (Math.min(countEffect(item, 'Negative Feedback'), 3) << 4);
+
+export const buildStatsContext = (inventory: InventoryItem[]): StatsContext => {
+    const internal = new Map<string, Stats>();
+    const flags = new Map<string, number>();
+    for (const item of inventory) {
+        internal.set(item.id, applyInternalEffects(item));
+        flags.set(item.id, effectFlags(item));
+    }
+    return {internal, flags};
+};
+
+const FS_SLOTS = 40;
+const fsId: string[] = new Array(FS_SLOTS).fill('');
+const fsFlags = new Int32Array(FS_SLOTS);
+const fsMinX = new Int32Array(FS_SLOTS);
+const fsMinY = new Int32Array(FS_SLOTS);
+const fsP = new Int32Array(FS_SLOTS);
+const fsQ = new Int32Array(FS_SLOTS);
+const fsE = new Int32Array(FS_SLOTS);
+const fsAbsP = new Int32Array(FS_SLOTS);
+const fsAbsQ = new Int32Array(FS_SLOTS);
+const fsAbsE = new Int32Array(FS_SLOTS);
+const fsNodeLo = new Int32Array(FS_SLOTS);
+const fsNodeHi = new Int32Array(FS_SLOTS);
+const fsPieceLo = new Int32Array(FS_SLOTS);
+const fsPieceHi = new Int32Array(FS_SLOTS);
+const fsCellSlot = new Int32Array(64);
+
+const popCount = (v: number) => {
+    v = v - ((v >>> 1) & 0x55555555);
+    v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+    return (((v + (v >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+};
+
+export const calculateBoardStatsFast = (
+    board: (InventoryItem | 'Locked' | null)[][],
+    ctx: StatsContext,
+    watchIds?: Set<string>
+): BoardStats => {
+    const rows = board.length;
+    const cols = board[0]?.length || 7;
+    const n = rows * cols;
+    let ns = 0;
+
+    for (let y = 0; y < rows; y++) {
+        const row = board[y];
+        for (let x = 0; x < cols; x++) {
+            const i = y * cols + x;
+            const cell = row[x];
+            if (!cell || cell === 'Locked') {
+                fsCellSlot[i] = -1;
+                continue;
+            }
+            let s = -1;
+            for (let j = 0; j < ns; j++) {
+                if (fsId[j] === cell.id) {
+                    s = j;
+                    break;
+                }
+            }
+            if (s < 0) {
+                s = ns++;
+                fsId[s] = cell.id;
+                fsMinX[s] = x;
+                fsMinY[s] = y;
+                const st = ctx.internal.get(cell.id) ?? applyInternalEffects(cell);
+                fsFlags[s] = ctx.flags.get(cell.id) ?? effectFlags(cell);
+                fsP[s] = st.Performance;
+                fsQ[s] = st.Quality;
+                fsE[s] = st.Efficiency;
+                fsAbsP[s] = 0;
+                fsAbsQ[s] = 0;
+                fsAbsE[s] = 0;
+                fsNodeLo[s] = 0;
+                fsNodeHi[s] = 0;
+                fsPieceLo[s] = 0;
+                fsPieceHi[s] = 0;
+            } else if (x < fsMinX[s]) {
+                fsMinX[s] = x;
+            }
+            fsCellSlot[i] = s;
+        }
+    }
+
+    for (let i = 0; i < n; i++) {
+        const s = fsCellSlot[i];
+        if (s < 0 || (fsFlags[s] & 1) === 0) continue;
+        const x = i % cols;
+        const y = (i - x) / cols;
+        for (let d = 0; d < 4; d++) {
+            const nx = x + NEIGHBOR_DX[d];
+            const ny = y + NEIGHBOR_DY[d];
+            if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+            const t = fsCellSlot[ny * cols + nx];
+            if (t < 0 || (fsFlags[t] & 1) !== 0) continue;
+            if (t < 32) fsNodeLo[s] |= (1 << t); else fsNodeHi[s] |= (1 << (t - 32));
+            if (s < 32) fsPieceLo[t] |= (1 << s); else fsPieceHi[t] |= (1 << (s - 32));
+        }
+    }
+
+    for (let s = 0; s < ns; s++) {
+        const nf = (fsFlags[s] >> 4) & 3;
+        if ((fsFlags[s] & 1) !== 0 || nf === 0) continue;
+        let seenLo = 0, seenHi = 0, nfP = 0, nfQ = 0, nfE = 0;
+        for (let i = 0; i < n; i++) {
+            if (fsCellSlot[i] !== s) continue;
+            const x = i % cols;
+            const y = (i - x) / cols;
+            for (let d = 0; d < 4; d++) {
+                const nx = x + NEIGHBOR_DX[d];
+                const ny = y + NEIGHBOR_DY[d];
+                if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+                const t = fsCellSlot[ny * cols + nx];
+                if (t < 0 || t === s || (fsFlags[t] & 1) !== 0) continue;
+                const seen = t < 32 ? (seenLo & (1 << t)) !== 0 : (seenHi & (1 << (t - 32))) !== 0;
+                if (seen) continue;
+                if (t < 32) seenLo |= (1 << t); else seenHi |= (1 << (t - 32));
+                if (fsP[t] < 0) nfP += fsP[t];
+                if (fsQ[t] < 0) nfQ += fsQ[t];
+                if (fsE[t] < 0) nfE += fsE[t];
+            }
+        }
+        fsAbsP[s] = nf * nfP;
+        fsAbsQ[s] = nf * nfQ;
+        fsAbsE[s] = nf * nfE;
+    }
+
+    let totP = 0, totQ = 0, totE = 0;
+    let pieceStats: Map<string, Stats> | undefined;
+    for (let s = 0; s < ns; s++) {
+        const fl = fsFlags[s];
+        if ((fl & 1) !== 0) {
+            let sumP = 0, sumQ = 0, sumE = 0;
+            for (let t = 0; t < ns; t++) {
+                const adj = t < 32 ? (fsNodeLo[s] & (1 << t)) !== 0 : (fsNodeHi[s] & (1 << (t - 32))) !== 0;
+                if (!adj) continue;
+                sumP += fsP[t];
+                sumQ += fsQ[t];
+                sumE += fsE[t];
+            }
+            totP += (sumP / 5) | 0;
+            totQ += (sumQ / 5) | 0;
+            totE += (sumE / 5) | 0;
+            continue;
+        }
+        const p = fsP[s], q = fsQ[s], e = fsE[s];
+        let pB = 0, qB = 0, eB = 0;
+        if ((fl & 2) !== 0 && fsMinX[s] === 0) {
+            pB += (p / 5) | 0;
+            qB += (q / 5) | 0;
+            eB += (e / 5) | 0;
+        }
+        if ((fl & 4) !== 0 && fsMinY[s] === 0) {
+            pB += (p / 5) | 0;
+            qB += (q / 5) | 0;
+            eB += (e / 5) | 0;
+        }
+        if ((fl & 8) !== 0) {
+            const adjn = popCount(fsPieceLo[s]) + popCount(fsPieceHi[s]);
+            pB += ((p * adjn) / 10) | 0;
+            qB += ((q * adjn) / 10) | 0;
+            eB += ((e * adjn) / 10) | 0;
+        }
+        const fp = ((((p + pB) * 4) + fsAbsP[s]) / 4) | 0;
+        const fq = ((((q + qB) * 4) + fsAbsQ[s]) / 4) | 0;
+        const fe = ((((e + eB) * 4) + fsAbsE[s]) / 4) | 0;
+        totP += fp;
+        totQ += fq;
+        totE += fe;
+        if (watchIds !== undefined && watchIds.has(fsId[s])) {
+            if (pieceStats === undefined) pieceStats = new Map<string, Stats>();
+            pieceStats.set(fsId[s], {Performance: fp, Quality: fq, Efficiency: fe});
+        }
+    }
+
+    return {
+        totals: {Performance: totP, Quality: totQ, Efficiency: totE},
+        pieceStats: pieceStats ?? EMPTY_PIECE_STATS,
+        coveredNodeSides: 0,
+        negativeContactCount: 0,
+        placedPiecesCount: ns,
+        placedAlarmsCount: 0,
+        placedJunkCount: 0,
+        placedBlastCount: 0
+    } as unknown as BoardStats;
+};
+
+const EMPTY_PIECE_STATS = new Map<string, Stats>();
 
 const FRAME_BUDGET_MS = 12;
 const TIMER_YIELD_INTERVAL_MS = 32;
@@ -1097,7 +1316,10 @@ export const runOptimizationEngine = async (
     const bestTiers = new Float64Array(tierCount + 1).fill(-Infinity);
     const currentBoards = initialBoards.map(b => b.map(row => [...row]));
 
-    const currentStats: BoardStats[] = currentBoards.map(b => calculateBoardStats(b, fullInventory, inventoryById));
+    const statsCtx = buildStatsContext(fullInventory);
+    const watchIds = new Set<string>([...objective.lumpyIds, ...objective.forcedIds]);
+    const fastStats = (board: (InventoryItem | 'Locked' | null)[][]) => calculateBoardStatsFast(board, statsCtx, watchIds);
+    const currentStats: BoardStats[] = currentBoards.map(b => fastStats(b));
     const currentCodes: string[] = new Array(machineCount).fill('');
     const codeIsStale: boolean[] = new Array(machineCount).fill(true);
 
@@ -1186,6 +1408,10 @@ export const runOptimizationEngine = async (
     const seenOnTarget = new Set<string>();
     const removedIds = new Set<string>();
     const specialsOnBoard: { piece: InventoryItem; cells: number[] }[][] = machines.map(() => []);
+    const forcedIdx: number[] = [];
+    searchPool.forEach((p, i) => {
+        if (isForcedModule(p)) forcedIdx.push(i);
+    });
     const freeCells: number[] = [];
     const rebuiltMachines: number[] = [];
     const isRebuilt: boolean[] = new Array(machineCount).fill(false);
@@ -1220,11 +1446,12 @@ export const runOptimizationEngine = async (
         dynWp: number, dynWq: number, dynWe: number,
         currentP: number, currentQ: number, currentE: number,
         config: MachineConfig,
-        incumbent: { x: number; y: number; orientation: Orientation } | null = null
+        incumbent: { x: number; y: number; orientation: Orientation } | null = null,
+        force: boolean = false
     ) => {
         let bestX = -1, bestY = -1;
         let bestOrientation: Orientation | null = null;
-        let highestHeuristic = incumbent !== null ? -Infinity : 0.0001;
+        let highestHeuristic = (incumbent !== null || force) ? -Infinity : 0.0001;
 
         if (incumbent !== null) {
             const incumbentScore = evaluatePlacementDelta(
@@ -1395,10 +1622,11 @@ export const runOptimizationEngine = async (
                 currentCodes[mIdx] = generateCodeFromState(m.tier, m.maximizeStats, m.targetStats, inventoryForCode, bestBoards[mIdx]);
                 codeIsStale[mIdx] = false;
             }
+            const fullStats = calculateBoardStats(bestBoards[mIdx], fullInventory, inventoryById);
             updates.set(m.id, {
                 board: bestBoards[mIdx].map(row => [...row]),
-                totals: bestStats[mIdx].totals,
-                pieceStats: bestStats[mIdx].pieceStats,
+                totals: fullStats.totals,
+                pieceStats: fullStats.pieceStats,
                 code: currentCodes[mIdx]
             });
         }
@@ -1556,7 +1784,7 @@ export const runOptimizationEngine = async (
                 shuffleInPlace(freeCells);
                 let fillBoardEmpty = freeCells.length === openCellCount[fillMIdx];
 
-                let currentTotals = calculateBoardStats(fillBoard, fullInventory, inventoryById).totals;
+                let currentTotals = fastStats(fillBoard).totals;
 
                 for (const special of specialsOnBoard[fillMIdx]) {
                     const ctx = placementContexts.get(special.piece.id);
@@ -1600,7 +1828,7 @@ export const runOptimizationEngine = async (
                         );
                     }
                     fillBoardEmpty = false;
-                    currentTotals = calculateBoardStats(fillBoard, fullInventory, inventoryById).totals;
+                    currentTotals = fastStats(fillBoard).totals;
                 }
 
                 infeasibleShapes.clear();
@@ -1614,6 +1842,19 @@ export const runOptimizationEngine = async (
                     }
                 }
                 const values = drawValues[fillMIdx][metMask];
+
+                for (const pieceIdx of forcedIdx) {
+                    if (placedMark[pieceIdx] === markGen || consumedMark[pieceIdx] === consumedGen) continue;
+                    if (isIneligible[fillMIdx][pieceIdx] === 1) continue;
+                    const forcedCtx = ctxByIndex[pieceIdx];
+                    const forcedOrientations = orientationsByIndex[pieceIdx];
+                    if (!forcedOrientations || freeCells.length < forcedCtx.size) continue;
+                    if (placeBestFit(forcedCtx, forcedOrientations, searchPool[pieceIdx], fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe, currentTotals.Performance, currentTotals.Quality, currentTotals.Efficiency, fillConfig, null, true)) {
+                        fillBoardEmpty = false;
+                        consumedMark[pieceIdx] = consumedGen;
+                        currentTotals = fastStats(fillBoard).totals;
+                    }
+                }
 
                 let drawn = 0;
                 while (drawn < poolOrder.length && infeasibleShapes.size < poolShapeCount) {
@@ -1647,7 +1888,7 @@ export const runOptimizationEngine = async (
                     if (placeBestFit(ctx, orientations, piece, fillBoard, fillBoardEmpty, dynWp, dynWq, dynWe, currentTotals.Performance, currentTotals.Quality, currentTotals.Efficiency, fillConfig)) {
                         fillBoardEmpty = false;
                         consumedMark[pieceIdx] = consumedGen;
-                        currentTotals = calculateBoardStats(fillBoard, fullInventory, inventoryById).totals;
+                        currentTotals = fastStats(fillBoard).totals;
                     } else {
                         infeasibleShapes.add(piece.shape);
                     }
@@ -1655,7 +1896,7 @@ export const runOptimizationEngine = async (
             }
 
             for (const mIdx of rebuiltMachines) {
-                rebuiltStats[mIdx] = calculateBoardStats(testBoards[mIdx], fullInventory, inventoryById);
+                rebuiltStats[mIdx] = fastStats(testBoards[mIdx]);
             }
             const statsFor = (mIdx: number) =>
                 isRebuilt[mIdx] ? rebuiltStats[mIdx]! : currentStats[mIdx];
@@ -1696,7 +1937,7 @@ export const runOptimizationEngine = async (
                     epochTiers.fill(-Infinity);
                     for (let mIdx = 0; mIdx < machineCount; mIdx++) {
                         currentBoards[mIdx] = initialBoards[mIdx].map(row => [...row]);
-                        currentStats[mIdx] = calculateBoardStats(currentBoards[mIdx], fullInventory, inventoryById);
+                        currentStats[mIdx] = fastStats(currentBoards[mIdx]);
                     }
                 }
             }
